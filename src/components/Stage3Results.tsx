@@ -398,6 +398,66 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   return false;
 }
 
+function checkRangeMatch(str1: string, str2: string): boolean {
+  // Extract numbers from both strings
+  const extractAllNumbers = (str: string): number[] => {
+    const matches = str.match(/\d+(?:\.\d+)?/g);
+    return matches ? matches.map(m => parseFloat(m)) : [];
+  };
+  
+  const nums1 = extractAllNumbers(str1);
+  const nums2 = extractAllNumbers(str2);
+  
+  if (nums1.length === 0 || nums2.length === 0) return false;
+  
+  // If one is a range (has "to", "-", "~", "up to", etc.)
+  const isRange1 = /(?:to|\-|~|up to|upto|from)/i.test(str1);
+  const isRange2 = /(?:to|\-|~|up to|upto|from)/i.test(str2);
+  
+  if (isRange1 && nums1.length >= 2) {
+    // str1 is a range like "0.1mm to 6.0mm"
+    const [min1, max1] = [Math.min(...nums1.slice(0, 2)), Math.max(...nums1.slice(0, 2))];
+    
+    // Check if any number from str2 falls within str1 range
+    for (const num of nums2) {
+      if (num >= min1 && num <= max1) {
+        // Check units
+        const hasMm1 = str1.includes('mm') || str1.includes('millimeter');
+        const hasMm2 = str2.includes('mm') || str2.includes('millimeter');
+        const hasCm1 = str1.includes('cm') || str1.includes('centimeter');
+        const hasCm2 = str2.includes('cm') || str2.includes('centimeter');
+        
+        if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2) || 
+            (!hasMm1 && !hasCm1 && !hasMm2 && !hasCm2)) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  if (isRange2 && nums2.length >= 2) {
+    // str2 is a range like "0.1mm to 6.0mm"
+    const [min2, max2] = [Math.min(...nums2.slice(0, 2)), Math.max(...nums2.slice(0, 2))];
+    
+    // Check if any number from str1 falls within str2 range
+    for (const num of nums1) {
+      if (num >= min2 && num <= max2) {
+        // Check units
+        const hasMm1 = str1.includes('mm') || str1.includes('millimeter');
+        const hasMm2 = str2.includes('mm') || str2.includes('millimeter');
+        const hasCm1 = str1.includes('cm') || str1.includes('centimeter');
+        const hasCm2 = str2.includes('cm') || str2.includes('centimeter');
+        
+        if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2) || 
+            (!hasMm1 && !hasCm1 && !hasMm2 && !hasCm2)) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  return false;
+}
 
 // For Common Specs: Bas common options only
 function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
@@ -407,8 +467,21 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
   options1.forEach((opt1) => {
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
+      
+      // ✅ Handle range matching
       if (isSemanticallySimilarOption(opt1, opt2)) {
-        common.push(opt1);
+        // ✅ Special handling: if opt2 is a range, add matching single values
+        if (/to|\-|~|up to|upto/i.test(opt2)) {
+          // Extract matching single values from options1 that fall within range
+          const matchingValues = options1.filter(opt => 
+            opt !== opt1 && isSemanticallySimilarOption(opt, opt2)
+          );
+          
+          // Add the range itself OR add matching single values
+          common.push(opt1); // or you can push matchingValues
+        } else {
+          common.push(opt1);
+        }
         usedIndices.add(j);
       }
     });
@@ -416,7 +489,6 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
   
   return common; // Jitne hain sab common options return karo
 }
-
 // For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
 function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
   const result: string[] = [];
