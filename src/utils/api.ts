@@ -2,31 +2,8 @@ import type { InputData, Stage1Output, ISQ, ExcelData } from "../types";
 
 function normalizeSpecName(name: string): string {
   let normalized = name.toLowerCase().trim();
-  
-  // Remove special characters
   normalized = normalized.replace(/[()\-_,.;]/g, ' ');
   
-  // ✅ NEW: Handle plurals
-  const words = normalized.split(/\s+/).filter(w => w.length > 0);
-  const singularWords = words.map(word => {
-    // Handle common plural endings
-    if (word.endsWith('s') && !word.endsWith('ss')) {
-      return word.slice(0, -1); // bolts -> bolt
-    }
-    if (word.endsWith('ies')) {
-      return word.slice(0, -3) + 'y'; // categories -> category
-    }
-    if (word.endsWith('es')) {
-      const base = word.slice(0, -2);
-      // Check if removing 'es' makes sense
-      if (['ss', 'x', 'ch', 'sh'].some(suffix => base.endsWith(suffix))) {
-        return base; // boxes -> box, churches -> church
-      }
-    }
-    return word;
-  });
-  
-  // Standardize common terms (expanded list)
   const standardizations: Record<string, string> = {
     'material': 'material',
     'grade': 'grade',
@@ -58,31 +35,11 @@ function normalizeSpecName(name: string): string {
     'pattern': 'pattern',
     'design': 'design',
     'application': 'application',
-    'usage': 'application',
-    // ✅ NEW: Product type synonyms
-    'bolt': 'bolt',
-    'bolts': 'bolt',
-    'stud': 'stud',
-    'studs': 'stud',
-    'nut': 'nut',
-    'nuts': 'nut',
-    'screw': 'bolt',
-    'fastener': 'bolt',
-    'pipe': 'pipe',
-    'pipes': 'pipe',
-    'tube': 'pipe',
-    'sheet': 'sheet',
-    'sheets': 'sheet',
-    'plate': 'sheet',
-    'rod': 'rod',
-    'rods': 'rod',
-    'bar': 'rod',
-    'wire': 'wire',
-    'wires': 'wire',
-    'cable': 'wire'
+    'usage': 'application'
   };
   
-  const standardizedWords = singularWords.map(word => {
+  const words = normalized.split(/\s+/).filter(w => w.length > 0);
+  const standardizedWords = words.map(word => {
     if (standardizations[word]) {
       return standardizations[word];
     }
@@ -96,11 +53,8 @@ function normalizeSpecName(name: string): string {
     return word;
   });
   
-  // Remove duplicates
   const uniqueWords = [...new Set(standardizedWords)];
-  
-  // Remove common filler words
-  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'wire', 'cable', 'bolt', 'nut', 'stud', 'screw', 'in', 'for', 'of', 'the', 'and', 'or'];
+  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'in', 'for', 'of', 'the'];
   const filteredWords = uniqueWords.filter(word => !fillerWords.includes(word));
   
   return filteredWords.join(' ').trim();
@@ -113,24 +67,6 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   if (norm1 === norm2) return true;
   if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
   
-  // ✅ NEW: Handle plural/singular matching
-  const handlePlural = (word: string): string => {
-    if (word.endsWith('s')) return word.slice(0, -1); // Remove 's'
-    if (word.endsWith('ies')) return word.slice(0, -3) + 'y'; // countries -> country
-    return word;
-  };
-  
-  const words1 = norm1.split(' ');
-  const words2 = norm2.split(' ');
-  
-  // Check if words are same after handling plurals
-  if (words1.length === 1 && words2.length === 1) {
-    const base1 = handlePlural(words1[0]);
-    const base2 = handlePlural(words2[0]);
-    if (base1 === base2) return true;
-  }
-  
-  // Check for synonym groups
   const synonymGroups = [
     ['material', 'composition', 'fabric'],
     ['grade', 'quality', 'class', 'standard'],
@@ -147,15 +83,7 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
     ['shape', 'form', 'profile'],
     ['hole', 'perforation', 'aperture'],
     ['pattern', 'design', 'arrangement'],
-    ['application', 'use', 'purpose', 'usage'],
-    // ✅ NEW: Add common product type synonyms
-    ['bolt', 'bolts', 'screw'],
-    ['stud', 'studs', 'pin'],
-    ['nut', 'nuts', 'fastener'],
-    ['pipe', 'pipes', 'tube'],
-    ['sheet', 'sheets', 'plate'],
-    ['rod', 'rods', 'bar'],
-    ['wire', 'wires', 'cable']
+    ['application', 'use', 'purpose', 'usage']
   ];
   
   for (const group of synonymGroups) {
@@ -166,6 +94,7 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   
   return false;
 }
+
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function fetchWithRetry(
@@ -1076,7 +1005,6 @@ export function compareResults(
 
   const matchedChatgpt = new Set<number>();
   const matchedGemini = new Set<number>();
-  const addedSpecNames = new Set<string>(); // ✅ NEW: Track added specs
 
   chatgptAllSpecs.forEach((chatgptSpec, i) => {
     let foundMatch = false;
@@ -1088,12 +1016,6 @@ export function compareResults(
         matchedChatgpt.add(i);
         matchedGemini.add(j);
         foundMatch = true;
-        
-        // ✅ Check for duplicates
-        const normalizedName = normalizeSpecName(chatgptSpec.spec_name);
-        if (addedSpecNames.has(normalizedName)) return; // Skip if already added
-        
-        addedSpecNames.add(normalizedName);
         
         const commonOpts = findCommonOptions(chatgptSpec.options, geminiSpec.options);
         const chatgptUniq = chatgptSpec.options.filter(opt => 
@@ -1115,28 +1037,19 @@ export function compareResults(
     });
     
     if (!foundMatch) {
-      // ✅ Check for duplicates in unique specs too
-      const normalizedName = normalizeSpecName(chatgptSpec.spec_name);
-      if (!addedSpecNames.has(normalizedName)) {
-        addedSpecNames.add(normalizedName);
-        chatgptUnique.push({
-          spec_name: chatgptSpec.spec_name,
-          options: chatgptSpec.options
-        });
-      }
+      chatgptUnique.push({
+        spec_name: chatgptSpec.spec_name,
+        options: chatgptSpec.options
+      });
     }
   });
 
   geminiAllSpecs.forEach((geminiSpec, j) => {
     if (!matchedGemini.has(j)) {
-      const normalizedName = normalizeSpecName(geminiSpec.spec_name);
-      if (!addedSpecNames.has(normalizedName)) {
-        addedSpecNames.add(normalizedName);
-        geminiUnique.push({
-          spec_name: geminiSpec.spec_name,
-          options: geminiSpec.options
-        });
-      }
+      geminiUnique.push({
+        spec_name: geminiSpec.spec_name,
+        options: geminiSpec.options
+      });
     }
   });
 
@@ -1146,6 +1059,7 @@ export function compareResults(
     gemini_unique_specs: geminiUnique,
   };
 }
+
 // Helper functions
 function extractAllSpecsWithOptions(specs: Stage1Output): Array<{ spec_name: string; options: string[] }> {
   const allSpecs: Array<{ spec_name: string; options: string[] }> = [];
@@ -1179,93 +1093,9 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   if (clean1 === clean2) return true;
   if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
   
-  // ✅ NEW: Check for range matches
-  const isRangeMatch = checkRangeMatch(clean1, clean2);
-  if (isRangeMatch) return true;
-  
-  // Extract numbers with DECIMALS support
-  const extractNumberAndUnit = (str: string) => {
-    // ✅ Handle ranges like "0.1mm to 6.0mm"
-    const rangeMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|')?\s*to\s*(\d+(?:\.\d+)?)\s*(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|')?/i);
-    if (rangeMatch) {
-      return {
-        isRange: true,
-        min: parseFloat(rangeMatch[1]),
-        max: parseFloat(rangeMatch[2]),
-        unit: (rangeMatch[3] || 'mm').toLowerCase()
-      };
-    }
-    
-    // Regular number extraction
-    const numMatch = str.match(/(\d+(\.\d+)?)/);
-    const unitMatch = str.match(/(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|'|kg|g|l|ml)/i);
-    return {
-      isRange: false,
-      number: numMatch ? parseFloat(numMatch[1]) : null,
-      unit: unitMatch ? unitMatch[0].toLowerCase() : null
-    };
-  };
-  
-  const data1 = extractNumberAndUnit(clean1);
-  const data2 = extractNumberAndUnit(clean2);
-  
-  // ✅ Handle range vs single value comparison
-  if (data1.isRange && !data2.isRange) {
-    // Range vs single value: check if single value falls within range
-    if (data2.number !== null && 
-        data2.number >= data1.min && 
-        data2.number <= data1.max &&
-        (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
-      return true;
-    }
-  } else if (!data1.isRange && data2.isRange) {
-    // Single value vs range: check if single value falls within range
-    if (data1.number !== null && 
-        data1.number >= data2.min && 
-        data1.number <= data2.max &&
-        (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
-      return true;
-    }
-  } else if (data1.isRange && data2.isRange) {
-    // Range vs Range: check for overlap
-    const overlap = data1.max >= data2.min && data2.max >= data1.min;
-    if (overlap && (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
-      return true;
-    }
-  } else if (data1.number && data2.number) {
-    // Both are single values
-    // ✅ FIXED: Check EXACT equality (1.2 != 12)
-    if (data1.number !== data2.number) return false;
-    
-    // Check if they're the same unit type
-    const hasMm1 = clean1.includes('mm') || clean1.includes('millimeter');
-    const hasMm2 = clean2.includes('mm') || clean2.includes('millimeter');
-    const hasCm1 = clean1.includes('cm') || clean1.includes('centimeter');
-    const hasCm2 = clean2.includes('cm') || clean2.includes('centimeter');
-    const hasInch1 = clean1.includes('inch') || clean1.includes('"');
-    const hasInch2 = clean2.includes('inch') || clean2.includes('"');
-    const hasFt1 = clean1.includes('ft') || clean1.includes('feet');
-    const hasFt2 = clean2.includes('ft') || clean2.includes('feet');
-    
-    if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2) || (hasInch1 && hasInch2) || (hasFt1 && hasFt2)) {
-      return true;
-    }
-    
-    // If both have no units but same number
-    if (!hasMm1 && !hasCm1 && !hasInch1 && !hasFt1 && 
-        !hasMm2 && !hasCm2 && !hasInch2 && !hasFt2 && 
-        data1.number === data2.number) {
-      return true;
-    }
-  }
-  
-  // Handle steel grades and common equivalences
   const equivalences: Record<string, string[]> = {
     '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
     '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
-    '201': ['ss201', 'ss 201'],
-    '202': ['ss202', 'ss 202'],
-    '430': ['ss430', 'ss 430'],
     'ss304': ['ss 304', 'stainless steel 304'],
     'ss316': ['ss 316', 'stainless steel 316'],
     'ms': ['mild steel', 'mildsteel', 'carbon steel'],
@@ -1279,10 +1109,6 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     'standard': ['std', 'regular', 'normal'],
     'premium': ['high quality', 'superior'],
     'economy': ['budget', 'low cost'],
-    '2b': ['2b finish'],
-    'ba': ['bright annealed'],
-    'mirror': ['mirror finish', 'polished'],
-    'hairline': ['hairline finish', 'brushed'],
   };
   
   for (const [base, alts] of Object.entries(equivalences)) {
@@ -1291,18 +1117,29 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
     
     if (hasOpt1 && hasOpt2) {
-      // Extract numbers (including decimals)
-      const numMatch1 = clean1.match(/(\d+(?:\.\d+)?)/);
-      const numMatch2 = clean2.match(/(\d+(?:\.\d+)?)/);
+      const num1 = clean1.match(/(\d+\.?\d*)/)?.[0];
+      const num2 = clean2.match(/(\d+\.?\d*)/)?.[0];
       
-      if (numMatch1 && numMatch2) {
-        const num1 = parseFloat(numMatch1[1]);
-        const num2 = parseFloat(numMatch2[1]);
-        if (num1 !== num2) {
-          continue; // Different numbers, not similar
-        }
+      if (num1 && num2 && num1 !== num2) {
+        continue;
       }
       
+      return true;
+    }
+  }
+  
+  const numMatch1 = clean1.match(/(\d+\.?\d*)/);
+  const numMatch2 = clean2.match(/(\d+\.?\d*)/);
+  
+  if (numMatch1 && numMatch2 && numMatch1[0] === numMatch2[0]) {
+    const hasMm1 = clean1.includes('mm') || clean1.includes('millimeter');
+    const hasMm2 = clean2.includes('mm') || clean2.includes('millimeter');
+    const hasInch1 = clean1.includes('inch') || clean1.includes('"');
+    const hasInch2 = clean2.includes('inch') || clean2.includes('"');
+    const hasFt1 = clean1.includes('ft') || clean1.includes('feet');
+    const hasFt2 = clean2.includes('ft') || clean2.includes('feet');
+    
+    if ((hasMm1 && hasMm2) || (hasInch1 && hasInch2) || (hasFt1 && hasFt2)) {
       return true;
     }
   }
@@ -1310,190 +1147,18 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   return false;
 }
 
-// ✅ NEW: Function to check if single value matches a range
-function checkRangeMatch(str1: string, str2: string): boolean {
-  // Extract numbers from both strings
-  const extractAllNumbers = (str: string): number[] => {
-    const matches = str.match(/\d+(?:\.\d+)?/g);
-    return matches ? matches.map(m => parseFloat(m)) : [];
-  };
-  
-  const nums1 = extractAllNumbers(str1);
-  const nums2 = extractAllNumbers(str2);
-  
-  if (nums1.length === 0 || nums2.length === 0) return false;
-  
-  // Check if one is a range (has "to", "-", "~", "up to", etc.)
-  const isRange1 = /(?:to|\-|~|up to|upto|from)/i.test(str1);
-  const isRange2 = /(?:to|\-|~|up to|upto|from)/i.test(str2);
-  
-  // Helper function to check unit compatibility
-  const unitsCompatible = (s1: string, s2: string): boolean => {
-    const units = ['mm', 'cm', 'm', 'inch', 'ft', 'meter', 'millimeter', 'centimeter'];
-    const getUnit = (s: string): string | null => {
-      for (const unit of units) {
-        if (s.includes(unit)) return unit;
-      }
-      return null;
-    };
-    
-    const unit1 = getUnit(s1);
-    const unit2 = getUnit(s2);
-    
-    // If both have no units, they're compatible
-    if (!unit1 && !unit2) return true;
-    // If only one has a unit, not compatible
-    if (!unit1 || !unit2) return false;
-    // Check if units are same or compatible
-    const compatibleUnits: Record<string, string[]> = {
-      'mm': ['millimeter'],
-      'millimeter': ['mm'],
-      'cm': ['centimeter'],
-      'centimeter': ['cm'],
-      'm': ['meter'],
-      'meter': ['m'],
-      'inch': ['"'],
-      '"': ['inch'],
-      'ft': ['feet'],
-      'feet': ['ft']
-    };
-    
-    return unit1 === unit2 || 
-           (compatibleUnits[unit1] && compatibleUnits[unit1].includes(unit2)) ||
-           (compatibleUnits[unit2] && compatibleUnits[unit2].includes(unit1));
-  };
-  
-  if (isRange1 && nums1.length >= 2) {
-    // str1 is a range like "0.1mm to 6.0mm"
-    const [min1, max1] = [Math.min(...nums1.slice(0, 2)), Math.max(...nums1.slice(0, 2))];
-    
-    // Check if any number from str2 falls within str1 range
-    for (const num of nums2) {
-      if (num >= min1 && num <= max1 && unitsCompatible(str1, str2)) {
-        return true;
-      }
-    }
-  }
-  
-  if (isRange2 && nums2.length >= 2) {
-    // str2 is a range like "0.1mm to 6.0mm"
-    const [min2, max2] = [Math.min(...nums2.slice(0, 2)), Math.max(...nums2.slice(0, 2))];
-    
-    // Check if any number from str1 falls within str2 range
-    for (const num of nums1) {
-      if (num >= min2 && num <= max2 && unitsCompatible(str1, str2)) {
-        return true;
-      }
-    }
-  }
-  
-  return false;
-}
-
-// ✅ YAHAN ADD KARO - checkRangeMatch ke BAAD
-function getOptionsWithinRangeApi(rangeStr: string, options: string[]): string[] {
-  const rangeLower = rangeStr.toLowerCase();
-  const matches: string[] = [];
-  
-  // Extract range boundaries
-  const rangeNums = (rangeLower.match(/\d+(?:\.\d+)?/g) || []).map(n => parseFloat(n));
-  if (rangeNums.length < 2) return matches;
-  
-  const [rangeMin, rangeMax] = [Math.min(rangeNums[0], rangeNums[1]), Math.max(rangeNums[0], rangeNums[1])];
-  
-  // Extract range unit
-  let rangeUnit = 'mm'; // default
-  if (rangeLower.includes('mm') || rangeLower.includes('millimeter')) rangeUnit = 'mm';
-  else if (rangeLower.includes('cm') || rangeLower.includes('centimeter')) rangeUnit = 'cm';
-  else if (rangeLower.includes('m') || rangeLower.includes('meter')) rangeUnit = 'm';
-  else if (rangeLower.includes('inch') || rangeLower.includes('"')) rangeUnit = 'inch';
-  else if (rangeLower.includes('ft') || rangeLower.includes('feet')) rangeUnit = 'ft';
-  
-  // Check each option
-  options.forEach(option => {
-    const optionLower = option.toLowerCase();
-    
-    // Skip if option itself is a range
-    if (/(?:to|\-|~|up to|upto|from)/i.test(optionLower)) return;
-    
-    // Extract number from option
-    const numMatch = optionLower.match(/(\d+(?:\.\d+)?)/);
-    if (!numMatch) return;
-    
-    const optionNum = parseFloat(numMatch[1]);
-    
-    // Extract option unit
-    let optionUnit = 'mm'; // default
-    if (optionLower.includes('mm') || optionLower.includes('millimeter')) optionUnit = 'mm';
-    else if (optionLower.includes('cm') || optionLower.includes('centimeter')) optionUnit = 'cm';
-    else if (optionLower.includes('m') || optionLower.includes('meter')) optionUnit = 'm';
-    else if (optionLower.includes('inch') || optionLower.includes('"')) optionUnit = 'inch';
-    else if (optionLower.includes('ft') || optionLower.includes('feet')) optionUnit = 'ft';
-    
-    // Check if option falls within range AND units match
-    if (optionNum >= rangeMin && optionNum <= rangeMax && rangeUnit === optionUnit) {
-      matches.push(option);
-    }
-  });
-  
-  return matches;
-}
 function findCommonOptions(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
   const usedIndices = new Set<number>();
   
-  // FIRST: Check direct non-range matches
-  options1.forEach((opt1) => {
+  options1.forEach((opt1, i) => {
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
-      
-      // Skip if either is a range (we'll handle ranges separately)
-      if (/(?:to|\-|~|up to|upto|from)/i.test(opt1) || 
-          /(?:to|\-|~|up to|upto|from)/i.test(opt2)) {
-        return;
-      }
-      
       if (isSemanticallySimilarOption(opt1, opt2)) {
         common.push(opt1);
         usedIndices.add(j);
       }
     });
-  });
-  
-  // SECOND: Handle options2 ranges (Stage2 has ranges)
-  options2.forEach((opt2, j) => {
-    if (usedIndices.has(j)) return;
-    
-    // If Stage2 option is a range
-    if (/(?:to|\-|~|up to|upto|from)/i.test(opt2)) {
-      // Find ALL Stage1 options that fall within this range
-      const matchingStage1Options = getOptionsWithinRangeApi(opt2, options1);
-      
-      matchingStage1Options.forEach(match => {
-        if (!common.includes(match)) {
-          common.push(match);
-        }
-      });
-      
-      if (matchingStage1Options.length > 0) {
-        usedIndices.add(j);
-      }
-    }
-  });
-  
-  // THIRD: Handle options1 ranges (if any)
-  options1.forEach((opt1, i) => {
-    // If Stage1 option is a range
-    if (/(?:to|\-|~|up to|upto|from)/i.test(opt1)) {
-      // Find ALL Stage2 options that fall within this range
-      const matchingStage2Options = getOptionsWithinRangeApi(opt1, options2);
-      
-      matchingStage2Options.forEach(match => {
-        if (!common.includes(match)) {
-          common.push(match);
-        }
-      });
-    }
   });
   
   return common;
