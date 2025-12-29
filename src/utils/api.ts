@@ -1076,6 +1076,7 @@ export function compareResults(
 
   const matchedChatgpt = new Set<number>();
   const matchedGemini = new Set<number>();
+  const addedSpecNames = new Set<string>(); // ✅ NEW: Track added specs
 
   chatgptAllSpecs.forEach((chatgptSpec, i) => {
     let foundMatch = false;
@@ -1087,6 +1088,12 @@ export function compareResults(
         matchedChatgpt.add(i);
         matchedGemini.add(j);
         foundMatch = true;
+        
+        // ✅ Check for duplicates
+        const normalizedName = normalizeSpecName(chatgptSpec.spec_name);
+        if (addedSpecNames.has(normalizedName)) return; // Skip if already added
+        
+        addedSpecNames.add(normalizedName);
         
         const commonOpts = findCommonOptions(chatgptSpec.options, geminiSpec.options);
         const chatgptUniq = chatgptSpec.options.filter(opt => 
@@ -1108,19 +1115,28 @@ export function compareResults(
     });
     
     if (!foundMatch) {
-      chatgptUnique.push({
-        spec_name: chatgptSpec.spec_name,
-        options: chatgptSpec.options
-      });
+      // ✅ Check for duplicates in unique specs too
+      const normalizedName = normalizeSpecName(chatgptSpec.spec_name);
+      if (!addedSpecNames.has(normalizedName)) {
+        addedSpecNames.add(normalizedName);
+        chatgptUnique.push({
+          spec_name: chatgptSpec.spec_name,
+          options: chatgptSpec.options
+        });
+      }
     }
   });
 
   geminiAllSpecs.forEach((geminiSpec, j) => {
     if (!matchedGemini.has(j)) {
-      geminiUnique.push({
-        spec_name: geminiSpec.spec_name,
-        options: geminiSpec.options
-      });
+      const normalizedName = normalizeSpecName(geminiSpec.spec_name);
+      if (!addedSpecNames.has(normalizedName)) {
+        addedSpecNames.add(normalizedName);
+        geminiUnique.push({
+          spec_name: geminiSpec.spec_name,
+          options: geminiSpec.options
+        });
+      }
     }
   });
 
@@ -1130,7 +1146,6 @@ export function compareResults(
     gemini_unique_specs: geminiUnique,
   };
 }
-
 // Helper functions
 function extractAllSpecsWithOptions(specs: Stage1Output): Array<{ spec_name: string; options: string[] }> {
   const allSpecs: Array<{ spec_name: string; options: string[] }> = [];
