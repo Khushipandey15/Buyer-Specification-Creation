@@ -538,7 +538,7 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
   return common;
 }
 // For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
-ffunction getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
+function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
   const result: string[] = [];
   const used = new Set<string>();
   
