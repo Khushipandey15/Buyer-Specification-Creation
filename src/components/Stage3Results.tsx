@@ -411,6 +411,86 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   return false;
 }
 
+
+function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
+  if (!opt1 || !opt2) return false;
+  
+  const clean1 = opt1.toLowerCase().trim().replace(/\s+/g, '');
+  const clean2 = opt2.toLowerCase().trim().replace(/\s+/g, '');
+  
+  // Direct match
+  if (clean1 === clean2) return true;
+  
+  // Common equivalences
+  const equivalences: Record<string, string[]> = {
+    'round': ['circular', 'circle'],
+    'square': ['squared'],
+    'slotted': ['slot'],
+    'rectangular': ['rectangle'],
+    'hexagonal': ['hexagon'],
+    'flat': ['flatbar'],
+    'angle': ['lshape', 'l-shaped'],
+    'channel': ['cshape', 'c-shaped'],
+    'pipe': ['tube', 'tubular'],
+    '304': ['304l', '304h', 'ss304', 'ss304'],
+    '316': ['316l', '316ti', 'ss316', 'ss316'],
+    'ss304': ['stainlesssteel304', 'stainless304'],
+    'ss316': ['stainlesssteel316', 'stainless316'],
+    'ms': ['mildsteel', 'carbonsteel'],
+    'gi': ['galvanizediron'],
+    'aluminium': ['aluminum'],
+    'small': ['sm', 's'],
+    'medium': ['med', 'm'],
+    'large': ['lg', 'l'],
+    'extralarge': ['xl', 'x-large'],
+  };
+  
+  // Check equivalence groups
+  for (const [base, alts] of Object.entries(equivalences)) {
+    const allVariants = [base, ...alts];
+    const hasOpt1 = allVariants.some(variant => clean1.includes(variant));
+    const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
+    
+    if (hasOpt1 && hasOpt2) {
+      return true;
+    }
+  }
+  
+  // Number-based matching (for sizes, thickness, etc.)
+  const numMatch1 = clean1.match(/(\d+(\.\d+)?)/);
+  const numMatch2 = clean2.match(/(\d+(\.\d+)?)/);
+  
+  if (numMatch1 && numMatch2 && numMatch1[1] === numMatch2[1]) {
+    // Same number found
+    const unit1 = clean1.replace(numMatch1[1], '');
+    const unit2 = clean2.replace(numMatch2[1], '');
+    
+    // Check if units are compatible
+    const mmUnits = ['mm', 'millimeter', 'millimetre'];
+    const cmUnits = ['cm', 'centimeter', 'centimetre'];
+    const inchUnits = ['inch', 'in', '"', 'inches'];
+    const ftUnits = ['ft', 'feet', 'foot'];
+    
+    const hasMm1 = mmUnits.some(u => unit1.includes(u));
+    const hasMm2 = mmUnits.some(u => unit2.includes(u));
+    const hasCm1 = cmUnits.some(u => unit1.includes(u));
+    const hasCm2 = cmUnits.some(u => unit2.includes(u));
+    const hasInch1 = inchUnits.some(u => unit1.includes(u));
+    const hasInch2 = inchUnits.some(u => unit2.includes(u));
+    const hasFt1 = ftUnits.some(u => unit1.includes(u));
+    const hasFt2 = ftUnits.some(u => unit2.includes(u));
+    
+    if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2) || 
+        (hasInch1 && hasInch2) || (hasFt1 && hasFt2) ||
+        (!hasMm1 && !hasCm1 && !hasInch1 && !hasFt1 && 
+         !hasMm2 && !hasCm2 && !hasInch2 && !hasFt2)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 // For Common Specs: Bas common options only (jitne hain sab)
 function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
