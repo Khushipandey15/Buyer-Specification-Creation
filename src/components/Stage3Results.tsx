@@ -609,15 +609,27 @@ function selectTopBuyerISQsSemantic(
   commonSpecs: CommonSpecItem[],
   stage2ISQs: ISQ[]
 ): BuyerISQItem[] {
-  // Score each common spec based on importance
-  const scoredSpecs = commonSpecs.map(spec => {
+  // ✅ NEW: Remove duplicates first
+  const uniqueSpecs: CommonSpecItem[] = [];
+  const seenNormalizedNames = new Set<string>();
+  
+  commonSpecs.forEach(spec => {
+    const normalizedName = normalizeSpecName(spec.spec_name);
+    if (!seenNormalizedNames.has(normalizedName)) {
+      seenNormalizedNames.add(normalizedName);
+      uniqueSpecs.push(spec);
+    }
+  });
+  
+  // Score each unique spec based on importance
+  const scoredSpecs = uniqueSpecs.map(spec => {
     let score = 0;
     
     // Tier priority
     if (spec.category === 'Primary') score += 3;
     if (spec.category === 'Secondary') score += 1;
     
-    // Option count
+    // Option count (empty options get 0)
     score += Math.min(spec.options.length, 5);
     
     // Check if it's in stage2 config or keys (higher importance)
@@ -632,14 +644,15 @@ function selectTopBuyerISQsSemantic(
   // Sort by score descending
   scoredSpecs.sort((a, b) => b.score - a.score);
   
-  // Take top 2
-  return scoredSpecs.slice(0, 2).map(spec => ({
+  // Take top 2 (or less if not enough)
+  const selected = scoredSpecs.slice(0, 2);
+  
+  return selected.map(spec => ({
     spec_name: spec.spec_name,
     options: spec.options, // This will be replaced later with optimized options
     category: spec.category
   }));
 }
-
 function normalizeSpecName(name: string): string {
   let normalized = name.toLowerCase().trim();
   
