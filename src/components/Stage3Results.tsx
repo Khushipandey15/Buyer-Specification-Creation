@@ -218,14 +218,14 @@ function extractCommonAndBuyerSpecs(
         // For common specs: bas common options (jitne hain sab)
         const commonOptions = findCommonOptionsOnly(stage1Spec.options, stage2ISQ.options);
         
-        if (commonOptions.length > 0) {
-          commonSpecs.push({
-            spec_name: stage1Spec.spec_name,
-            options: commonOptions,
-            input_type: stage1Spec.input_type,
-            category: stage1Spec.tier
-          });
-        }
+        // ✅ CHANGE HERE: REMOVE THE `if (commonOptions.length > 0)` CONDITION
+        // ✅ Always add spec, even if no common options
+        commonSpecs.push({
+          spec_name: stage1Spec.spec_name,
+          options: commonOptions, // Can be empty array
+          input_type: stage1Spec.input_type,
+          category: stage1Spec.tier
+        });
       }
     });
   });
@@ -266,6 +266,7 @@ function extractCommonAndBuyerSpecs(
     buyerISQs: optimizedBuyerISQs  // Optimized 8 options for Buyer ISQs
   };
 }
+
 
 function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   const norm1 = normalizeSpecName(spec1);
