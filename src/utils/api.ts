@@ -1093,12 +1093,29 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   if (clean1 === clean2) return true;
   if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
   
+  // ✅ NEW: Check for range matches
+  const isRangeMatch = checkRangeMatch(clean1, clean2);
+  if (isRangeMatch) return true;
+  
   // Extract numbers with DECIMALS support
   const extractNumberAndUnit = (str: string) => {
-    const numMatch = str.match(/(\d+(\.\d+)?)/); // ✅ FIXED: Now supports decimals like 1.2, 0.8
+    // ✅ Handle ranges like "0.1mm to 6.0mm"
+    const rangeMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|')?\s*to\s*(\d+(?:\.\d+)?)\s*(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|')?/i);
+    if (rangeMatch) {
+      return {
+        isRange: true,
+        min: parseFloat(rangeMatch[1]),
+        max: parseFloat(rangeMatch[2]),
+        unit: (rangeMatch[3] || 'mm').toLowerCase()
+      };
+    }
+    
+    // Regular number extraction
+    const numMatch = str.match(/(\d+(\.\d+)?)/);
     const unitMatch = str.match(/(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|'|kg|g|l|ml)/i);
     return {
-      number: numMatch ? parseFloat(numMatch[1]) : null, // ✅ parseFloat for decimals
+      isRange: false,
+      number: numMatch ? parseFloat(numMatch[1]) : null,
       unit: unitMatch ? unitMatch[0].toLowerCase() : null
     };
   };
@@ -1106,7 +1123,31 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   const data1 = extractNumberAndUnit(clean1);
   const data2 = extractNumberAndUnit(clean2);
   
-  if (data1.number && data2.number) {
+  // ✅ Handle range vs single value comparison
+  if (data1.isRange && !data2.isRange) {
+    // Range vs single value: check if single value falls within range
+    if (data2.number !== null && 
+        data2.number >= data1.min && 
+        data2.number <= data1.max &&
+        (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
+      return true;
+    }
+  } else if (!data1.isRange && data2.isRange) {
+    // Single value vs range: check if single value falls within range
+    if (data1.number !== null && 
+        data1.number >= data2.min && 
+        data1.number <= data2.max &&
+        (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
+      return true;
+    }
+  } else if (data1.isRange && data2.isRange) {
+    // Range vs Range: check for overlap
+    const overlap = data1.max >= data2.min && data2.max >= data1.min;
+    if (overlap && (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
+      return true;
+    }
+  } else if (data1.number && data2.number) {
+    // Both are single values
     // ✅ FIXED: Check EXACT equality (1.2 != 12)
     if (data1.number !== data2.number) return false;
     
@@ -1132,10 +1173,13 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     }
   }
   
-  // Rest of your equivalences code...
+  // Handle steel grades and common equivalences
   const equivalences: Record<string, string[]> = {
     '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
     '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
+    '201': ['ss201', 'ss 201'],
+    '202': ['ss202', 'ss 202'],
+    '430': ['ss430', 'ss 430'],
     'ss304': ['ss 304', 'stainless steel 304'],
     'ss316': ['ss 316', 'stainless steel 316'],
     'ms': ['mild steel', 'mildsteel', 'carbon steel'],
@@ -1149,6 +1193,10 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     'standard': ['std', 'regular', 'normal'],
     'premium': ['high quality', 'superior'],
     'economy': ['budget', 'low cost'],
+    '2b': ['2b finish'],
+    'ba': ['bright annealed'],
+    'mirror': ['mirror finish', 'polished'],
+    'hairline': ['hairline finish', 'brushed'],
   };
   
   for (const [base, alts] of Object.entries(equivalences)) {
@@ -1157,9 +1205,9 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
     
     if (hasOpt1 && hasOpt2) {
-      // ✅ FIXED: Extract decimal numbers
-      const numMatch1 = clean1.match(/(\d+(\.\d+)?)/);
-      const numMatch2 = clean2.match(/(\d+(\.\d+)?)/);
+      // Extract numbers (including decimals)
+      const numMatch1 = clean1.match(/(\d+(?:\.\d+)?)/);
+      const numMatch2 = clean2.match(/(\d+(?:\.\d+)?)/);
       
       if (numMatch1 && numMatch2) {
         const num1 = parseFloat(numMatch1[1]);
@@ -1170,6 +1218,86 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
       }
       
       return true;
+    }
+  }
+  
+  return false;
+}
+
+// ✅ NEW: Function to check if single value matches a range
+function checkRangeMatch(str1: string, str2: string): boolean {
+  // Extract numbers from both strings
+  const extractAllNumbers = (str: string): number[] => {
+    const matches = str.match(/\d+(?:\.\d+)?/g);
+    return matches ? matches.map(m => parseFloat(m)) : [];
+  };
+  
+  const nums1 = extractAllNumbers(str1);
+  const nums2 = extractAllNumbers(str2);
+  
+  if (nums1.length === 0 || nums2.length === 0) return false;
+  
+  // Check if one is a range (has "to", "-", "~", "up to", etc.)
+  const isRange1 = /(?:to|\-|~|up to|upto|from)/i.test(str1);
+  const isRange2 = /(?:to|\-|~|up to|upto|from)/i.test(str2);
+  
+  // Helper function to check unit compatibility
+  const unitsCompatible = (s1: string, s2: string): boolean => {
+    const units = ['mm', 'cm', 'm', 'inch', 'ft', 'meter', 'millimeter', 'centimeter'];
+    const getUnit = (s: string): string | null => {
+      for (const unit of units) {
+        if (s.includes(unit)) return unit;
+      }
+      return null;
+    };
+    
+    const unit1 = getUnit(s1);
+    const unit2 = getUnit(s2);
+    
+    // If both have no units, they're compatible
+    if (!unit1 && !unit2) return true;
+    // If only one has a unit, not compatible
+    if (!unit1 || !unit2) return false;
+    // Check if units are same or compatible
+    const compatibleUnits: Record<string, string[]> = {
+      'mm': ['millimeter'],
+      'millimeter': ['mm'],
+      'cm': ['centimeter'],
+      'centimeter': ['cm'],
+      'm': ['meter'],
+      'meter': ['m'],
+      'inch': ['"'],
+      '"': ['inch'],
+      'ft': ['feet'],
+      'feet': ['ft']
+    };
+    
+    return unit1 === unit2 || 
+           (compatibleUnits[unit1] && compatibleUnits[unit1].includes(unit2)) ||
+           (compatibleUnits[unit2] && compatibleUnits[unit2].includes(unit1));
+  };
+  
+  if (isRange1 && nums1.length >= 2) {
+    // str1 is a range like "0.1mm to 6.0mm"
+    const [min1, max1] = [Math.min(...nums1.slice(0, 2)), Math.max(...nums1.slice(0, 2))];
+    
+    // Check if any number from str2 falls within str1 range
+    for (const num of nums2) {
+      if (num >= min1 && num <= max1 && unitsCompatible(str1, str2)) {
+        return true;
+      }
+    }
+  }
+  
+  if (isRange2 && nums2.length >= 2) {
+    // str2 is a range like "0.1mm to 6.0mm"
+    const [min2, max2] = [Math.min(...nums2.slice(0, 2)), Math.max(...nums2.slice(0, 2))];
+    
+    // Check if any number from str1 falls within str2 range
+    for (const num of nums1) {
+      if (num >= min2 && num <= max2 && unitsCompatible(str1, str2)) {
+        return true;
+      }
     }
   }
   
