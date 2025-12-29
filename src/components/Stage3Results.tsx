@@ -538,55 +538,93 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
   return common;
 }
 // For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
-function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
+ffunction getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
   const result: string[] = [];
   const used = new Set<string>();
   
-  // Phase 1: Find and add common options first
+  // Phase 1: Find and add common options first (EXACT matches)
   const matchedStage2Indices = new Set<number>();
   
+  // First pass: Exact matches
   stage1Options.forEach((opt1) => {
-    stage2Options.forEach((opt2, j) => {
-      if (result.length >= 8) return;
-      if (matchedStage2Indices.has(j)) return;
-      
-      if (isSemanticallySimilarOption(opt1, opt2)) {
-        result.push(opt1);
-        used.add(opt1.toLowerCase());
-        matchedStage2Indices.add(j);
-      }
+    if (result.length >= 8) return;
+    
+    const cleanOpt1 = opt1.trim().toLowerCase();
+    const exactMatchIndex = stage2Options.findIndex((opt2, j) => {
+      if (matchedStage2Indices.has(j)) return false;
+      const cleanOpt2 = opt2.trim().toLowerCase();
+      return cleanOpt1 === cleanOpt2;
     });
+    
+    if (exactMatchIndex !== -1 && !used.has(cleanOpt1)) {
+      result.push(opt1);
+      used.add(cleanOpt1);
+      matchedStage2Indices.add(exactMatchIndex);
+    }
   });
   
-  // Phase 2: Add remaining Stage 1 options
+  // Second pass: Semantic matches for remaining options
   if (result.length < 8) {
     stage1Options.forEach(opt1 => {
       if (result.length >= 8) return;
-      const optLower = opt1.toLowerCase();
-      if (!used.has(optLower)) {
+      
+      const cleanOpt1 = opt1.trim().toLowerCase();
+      if (used.has(cleanOpt1)) return;
+      
+      stage2Options.forEach((opt2, j) => {
+        if (result.length >= 8) return;
+        if (matchedStage2Indices.has(j)) return;
+        if (used.has(cleanOpt1)) return;
+        
+        if (isSemanticallySimilarOption(opt1, opt2) && !used.has(cleanOpt1)) {
+          result.push(opt1);
+          used.add(cleanOpt1);
+          matchedStage2Indices.add(j);
+        }
+      });
+    });
+  }
+  
+  // Phase 2: Add remaining Stage 1 options (no duplicates)
+  if (result.length < 8) {
+    stage1Options.forEach(opt1 => {
+      if (result.length >= 8) return;
+      
+      const cleanOpt1 = opt1.trim().toLowerCase();
+      if (!used.has(cleanOpt1)) {
         result.push(opt1);
-        used.add(optLower);
+        used.add(cleanOpt1);
       }
     });
   }
   
-  // Phase 3: If still less than 8, add Stage 2 options
+  // Phase 3: Add remaining Stage 2 options (no duplicates)
   if (result.length < 8) {
     stage2Options.forEach((opt2, j) => {
       if (result.length >= 8) return;
-      if (!matchedStage2Indices.has(j)) {
-        const optLower = opt2.toLowerCase();
-        if (!used.has(optLower)) {
-          result.push(opt2);
-          used.add(optLower);
-        }
+      
+      const cleanOpt2 = opt2.trim().toLowerCase();
+      if (!matchedStage2Indices.has(j) && !used.has(cleanOpt2)) {
+        result.push(opt2);
+        used.add(cleanOpt2);
       }
     });
   }
   
-  return result.slice(0, 8);
+  // Final deduplication check
+  const finalResult: string[] = [];
+  const finalUsed = new Set<string>();
+  
+  result.forEach(opt => {
+    const cleanOpt = opt.trim().toLowerCase();
+    if (!finalUsed.has(cleanOpt)) {
+      finalResult.push(opt);
+      finalUsed.add(cleanOpt);
+    }
+  });
+  
+  return finalResult.slice(0, 8);
 }
-
 function selectTopBuyerISQsSemantic(
   commonSpecs: CommonSpecItem[],
   stage2ISQs: ISQ[]
