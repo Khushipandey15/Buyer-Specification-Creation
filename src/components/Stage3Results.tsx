@@ -464,30 +464,66 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
   const common: string[] = [];
   const usedIndices = new Set<number>();
   
+  // FIRST: Check direct non-range matches
   options1.forEach((opt1) => {
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
       
-      // ✅ Handle range matching
+      // Skip if either is a range (we'll handle ranges separately)
+      if (/(?:to|\-|~|up to|upto|from)/i.test(opt1) || 
+          /(?:to|\-|~|up to|upto|from)/i.test(opt2)) {
+        return;
+      }
+      
       if (isSemanticallySimilarOption(opt1, opt2)) {
-        // ✅ Special handling: if opt2 is a range, add matching single values
-        if (/to|\-|~|up to|upto/i.test(opt2)) {
-          // Extract matching single values from options1 that fall within range
-          const matchingValues = options1.filter(opt => 
-            opt !== opt1 && isSemanticallySimilarOption(opt, opt2)
-          );
-          
-          // Add the range itself OR add matching single values
-          common.push(opt1); // or you can push matchingValues
-        } else {
-          common.push(opt1);
-        }
+        common.push(opt1);
         usedIndices.add(j);
       }
     });
   });
   
-  return common; // Jitne hain sab common options return karo
+  // SECOND: Handle Stage2 ranges (Stage2 has ranges like "0.1mm to 6.0mm")
+  options2.forEach((opt2, j) => {
+    if (usedIndices.has(j)) return;
+    
+    // If Stage2 option is a range
+    if (/(?:to|\-|~|up to|upto|from)/i.test(opt2)) {
+      // Find ALL Stage1 options that fall within this range
+      const matchingStage1Options = getOptionsWithinRange(opt2, options1);
+      
+      matchingStage1Options.forEach(match => {
+        if (!common.includes(match)) {
+          common.push(match);
+        }
+      });
+      
+      if (matchingStage1Options.length > 0) {
+        usedIndices.add(j);
+      }
+    }
+  });
+  
+  // THIRD: Handle Stage1 ranges (if any)
+  options1.forEach((opt1, i) => {
+    // If Stage1 option is a range
+    if (/(?:to|\-|~|up to|upto|from)/i.test(opt1)) {
+      // Find ALL Stage2 options that fall within this range
+      const matchingStage2Options = getOptionsWithinRange(opt1, options2);
+      
+      matchingStage2Options.forEach(match => {
+        if (!common.includes(match)) {
+          common.push(match);
+        }
+      });
+    }
+  });
+  
+  // Sort by numeric value if possible
+  return common.sort((a, b) => {
+    const numA = parseFloat(a.match(/(\d+(?:\.\d+)?)/)?.[1] || '0');
+    const numB = parseFloat(b.match(/(\d+(?:\.\d+)?)/)?.[1] || '0');
+    return numA - numB;
+  });
 }
 // For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
 function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
