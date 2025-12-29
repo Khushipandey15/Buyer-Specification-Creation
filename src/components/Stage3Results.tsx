@@ -312,7 +312,7 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
       .replace(/^ms\s*/i, '')
       .replace(/^astm\s*/i, '')
       .replace(/^is\s*/i, '')
-      .replace(/[^a-z0-9.]/g, '')  // CHANGE: '.' ko include karo decimals ke liye
+      .replace(/[^a-z0-9.]/g, '')
       .trim();
   
   const norm1 = normalize(opt1);
@@ -320,13 +320,32 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   
   if (norm1 === norm2) return true;
   
+  // ✅ Check for range matches
+  const isRangeMatch = checkRangeMatch(opt1.toLowerCase(), opt2.toLowerCase());
+  if (isRangeMatch) return true;
+  
   // Check for numeric equivalence (e.g., "10mm" vs "10 mm" vs "10")
-  // IMPROVED VERSION FOR DECIMALS
+  // ✅ IMPROVED VERSION FOR DECIMALS AND RANGES
   const extractNumberAndUnit = (str: string) => {
-    const numMatch = str.match(/(\d+(\.\d+)?)/); // DECIMALS SUPPORT
-    const unitMatch = str.match(/(mm|cm|millimeter|centimeter)/i);
+    const strLower = str.toLowerCase();
+    
+    // ✅ Handle ranges like "0.1mm to 6.0mm"
+    const rangeMatch = strLower.match(/(\d+(?:\.\d+)?)\s*(?:mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|')?\s*(?:to|till|upto|up to|~|-)\s*(\d+(?:\.\d+)?)\s*(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|')?/i);
+    if (rangeMatch) {
+      return {
+        isRange: true,
+        min: parseFloat(rangeMatch[1]),
+        max: parseFloat(rangeMatch[2]),
+        unit: (rangeMatch[3] || 'mm').toLowerCase()
+      };
+    }
+    
+    // Regular number extraction
+    const numMatch = strLower.match(/(\d+(?:\.\d+)?)/);
+    const unitMatch = strLower.match(/(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|'|kg|g|l|ml)/i);
     return {
-      number: numMatch ? parseFloat(numMatch[1]) : null, // parseFloat for decimals
+      isRange: false,
+      number: numMatch ? parseFloat(numMatch[1]) : null,
       unit: unitMatch ? unitMatch[0].toLowerCase() : null
     };
   };
@@ -334,28 +353,52 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   const data1 = extractNumberAndUnit(opt1);
   const data2 = extractNumberAndUnit(opt2);
   
-  if (data1.number && data2.number) {
-    // Check if numbers are EXACTLY equal (1.2 != 12)
+  // ✅ Handle range vs single value comparison
+  if (data1.isRange && !data2.isRange) {
+    // Range vs single value: check if single value falls within range
+    if (data2.number !== null && 
+        data2.number >= data1.min && 
+        data2.number <= data1.max &&
+        (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
+      return true;
+    }
+  } else if (!data1.isRange && data2.isRange) {
+    // Single value vs range: check if single value falls within range
+    if (data1.number !== null && 
+        data1.number >= data2.min && 
+        data1.number <= data2.max &&
+        (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
+      return true;
+    }
+  } else if (data1.isRange && data2.isRange) {
+    // Range vs Range: check for overlap
+    const overlap = data1.max >= data2.min && data2.max >= data1.min;
+    if (overlap && (!data1.unit || !data2.unit || data1.unit === data2.unit)) {
+      return true;
+    }
+  } else if (data1.number && data2.number) {
+    // Both are single values
+    // ✅ FIXED: Check EXACT equality (1.2 != 12)
     if (data1.number !== data2.number) return false;
     
     // Check if they're the same unit type
-    const hasMm1 = norm1.includes('mm') || norm1.includes('millimeter');
-    const hasMm2 = norm2.includes('mm') || norm2.includes('millimeter');
-    const hasCm1 = norm1.includes('cm') || norm1.includes('centimeter');
-    const hasCm2 = norm2.includes('cm') || norm2.includes('centimeter');
+    const opt1Lower = opt1.toLowerCase();
+    const opt2Lower = opt2.toLowerCase();
+    
+    const hasMm1 = opt1Lower.includes('mm') || opt1Lower.includes('millimeter');
+    const hasMm2 = opt2Lower.includes('mm') || opt2Lower.includes('millimeter');
+    const hasCm1 = opt1Lower.includes('cm') || opt1Lower.includes('centimeter');
+    const hasCm2 = opt2Lower.includes('cm') || opt2Lower.includes('centimeter');
     
     if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2)) {
-      return true;
-    }
-    
-    // If both have no units but same number
-    if (!hasMm1 && !hasCm1 && !hasMm2 && !hasCm2 && data1.number === data2.number) {
       return true;
     }
   }
   
   return false;
 }
+
+
 // For Common Specs: Bas common options only
 function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
