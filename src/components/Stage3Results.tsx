@@ -148,16 +148,27 @@ function SpecCard({
             <span className={`inline-block ${colors.badge} px-2 py-1 rounded`}>
               {spec.category}
             </span>
+            {spec.options.length === 0 && (
+              <span className="inline-block ml-2 text-gray-500 text-xs">
+                (No common options)
+              </span>
+            )}
           </div>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {spec.options.map((option, idx) => (
-          <span key={idx} className={`${colors.text} bg-white border border-current px-3 py-1 rounded-full text-sm`}>
-            {option}
+        {spec.options.length > 0 ? (
+          spec.options.map((option, idx) => (
+            <span key={idx} className={`${colors.text} bg-white border border-current px-3 py-1 rounded-full text-sm`}>
+              {option}
+            </span>
+          ))
+        ) : (
+          <span className="text-gray-400 italic text-sm">
+            No common options available for this specification
           </span>
-        ))}
+        )}
       </div>
     </div>
   );
