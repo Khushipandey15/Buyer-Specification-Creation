@@ -1304,6 +1304,54 @@ function checkRangeMatch(str1: string, str2: string): boolean {
   return false;
 }
 
+// ✅ YAHAN ADD KARO - checkRangeMatch ke BAAD
+function getOptionsWithinRangeApi(rangeStr: string, options: string[]): string[] {
+  const rangeLower = rangeStr.toLowerCase();
+  const matches: string[] = [];
+  
+  // Extract range boundaries
+  const rangeNums = (rangeLower.match(/\d+(?:\.\d+)?/g) || []).map(n => parseFloat(n));
+  if (rangeNums.length < 2) return matches;
+  
+  const [rangeMin, rangeMax] = [Math.min(rangeNums[0], rangeNums[1]), Math.max(rangeNums[0], rangeNums[1])];
+  
+  // Extract range unit
+  let rangeUnit = 'mm'; // default
+  if (rangeLower.includes('mm') || rangeLower.includes('millimeter')) rangeUnit = 'mm';
+  else if (rangeLower.includes('cm') || rangeLower.includes('centimeter')) rangeUnit = 'cm';
+  else if (rangeLower.includes('m') || rangeLower.includes('meter')) rangeUnit = 'm';
+  else if (rangeLower.includes('inch') || rangeLower.includes('"')) rangeUnit = 'inch';
+  else if (rangeLower.includes('ft') || rangeLower.includes('feet')) rangeUnit = 'ft';
+  
+  // Check each option
+  options.forEach(option => {
+    const optionLower = option.toLowerCase();
+    
+    // Skip if option itself is a range
+    if (/(?:to|\-|~|up to|upto|from)/i.test(optionLower)) return;
+    
+    // Extract number from option
+    const numMatch = optionLower.match(/(\d+(?:\.\d+)?)/);
+    if (!numMatch) return;
+    
+    const optionNum = parseFloat(numMatch[1]);
+    
+    // Extract option unit
+    let optionUnit = 'mm'; // default
+    if (optionLower.includes('mm') || optionLower.includes('millimeter')) optionUnit = 'mm';
+    else if (optionLower.includes('cm') || optionLower.includes('centimeter')) optionUnit = 'cm';
+    else if (optionLower.includes('m') || optionLower.includes('meter')) optionUnit = 'm';
+    else if (optionLower.includes('inch') || optionLower.includes('"')) optionUnit = 'inch';
+    else if (optionLower.includes('ft') || optionLower.includes('feet')) optionUnit = 'ft';
+    
+    // Check if option falls within range AND units match
+    if (optionNum >= rangeMin && optionNum <= rangeMax && rangeUnit === optionUnit) {
+      matches.push(option);
+    }
+  });
+  
+  return matches;
+}
 function findCommonOptions(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
   const usedIndices = new Set<number>();
