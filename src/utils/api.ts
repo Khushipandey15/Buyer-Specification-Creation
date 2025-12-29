@@ -1093,6 +1093,46 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   if (clean1 === clean2) return true;
   if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
   
+  // Extract numbers with DECIMALS support
+  const extractNumberAndUnit = (str: string) => {
+    const numMatch = str.match(/(\d+(\.\d+)?)/); // ✅ FIXED: Now supports decimals like 1.2, 0.8
+    const unitMatch = str.match(/(mm|cm|meter|millimeter|centimeter|inch|ft|feet|"|'|kg|g|l|ml)/i);
+    return {
+      number: numMatch ? parseFloat(numMatch[1]) : null, // ✅ parseFloat for decimals
+      unit: unitMatch ? unitMatch[0].toLowerCase() : null
+    };
+  };
+  
+  const data1 = extractNumberAndUnit(clean1);
+  const data2 = extractNumberAndUnit(clean2);
+  
+  if (data1.number && data2.number) {
+    // ✅ FIXED: Check EXACT equality (1.2 != 12)
+    if (data1.number !== data2.number) return false;
+    
+    // Check if they're the same unit type
+    const hasMm1 = clean1.includes('mm') || clean1.includes('millimeter');
+    const hasMm2 = clean2.includes('mm') || clean2.includes('millimeter');
+    const hasCm1 = clean1.includes('cm') || clean1.includes('centimeter');
+    const hasCm2 = clean2.includes('cm') || clean2.includes('centimeter');
+    const hasInch1 = clean1.includes('inch') || clean1.includes('"');
+    const hasInch2 = clean2.includes('inch') || clean2.includes('"');
+    const hasFt1 = clean1.includes('ft') || clean1.includes('feet');
+    const hasFt2 = clean2.includes('ft') || clean2.includes('feet');
+    
+    if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2) || (hasInch1 && hasInch2) || (hasFt1 && hasFt2)) {
+      return true;
+    }
+    
+    // If both have no units but same number
+    if (!hasMm1 && !hasCm1 && !hasInch1 && !hasFt1 && 
+        !hasMm2 && !hasCm2 && !hasInch2 && !hasFt2 && 
+        data1.number === data2.number) {
+      return true;
+    }
+  }
+  
+  // Rest of your equivalences code...
   const equivalences: Record<string, string[]> = {
     '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
     '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
@@ -1117,29 +1157,18 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
     
     if (hasOpt1 && hasOpt2) {
-      const num1 = clean1.match(/(\d+\.?\d*)/)?.[0];
-      const num2 = clean2.match(/(\d+\.?\d*)/)?.[0];
+      // ✅ FIXED: Extract decimal numbers
+      const numMatch1 = clean1.match(/(\d+(\.\d+)?)/);
+      const numMatch2 = clean2.match(/(\d+(\.\d+)?)/);
       
-      if (num1 && num2 && num1 !== num2) {
-        continue;
+      if (numMatch1 && numMatch2) {
+        const num1 = parseFloat(numMatch1[1]);
+        const num2 = parseFloat(numMatch2[1]);
+        if (num1 !== num2) {
+          continue; // Different numbers, not similar
+        }
       }
       
-      return true;
-    }
-  }
-  
-  const numMatch1 = clean1.match(/(\d+\.?\d*)/);
-  const numMatch2 = clean2.match(/(\d+\.?\d*)/);
-  
-  if (numMatch1 && numMatch2 && numMatch1[0] === numMatch2[0]) {
-    const hasMm1 = clean1.includes('mm') || clean1.includes('millimeter');
-    const hasMm2 = clean2.includes('mm') || clean2.includes('millimeter');
-    const hasInch1 = clean1.includes('inch') || clean1.includes('"');
-    const hasInch2 = clean2.includes('inch') || clean2.includes('"');
-    const hasFt1 = clean1.includes('ft') || clean1.includes('feet');
-    const hasFt2 = clean2.includes('ft') || clean2.includes('feet');
-    
-    if ((hasMm1 && hasMm2) || (hasInch1 && hasInch2) || (hasFt1 && hasFt2)) {
       return true;
     }
   }
