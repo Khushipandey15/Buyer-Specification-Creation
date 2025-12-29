@@ -495,15 +495,38 @@ function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
 function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
   const usedIndices = new Set<number>();
+  const addedOptions = new Set<string>(); // Duplicates track karne ke liye
   
+  // First pass: exact matches
   options1.forEach((opt1) => {
+    const cleanOpt1 = opt1.trim().toLowerCase();
+    
+    const exactMatchIndex = options2.findIndex((opt2, j) => {
+      if (usedIndices.has(j)) return false;
+      const cleanOpt2 = opt2.trim().toLowerCase();
+      return cleanOpt1 === cleanOpt2;
+    });
+    
+    if (exactMatchIndex !== -1 && !addedOptions.has(cleanOpt1)) {
+      common.push(opt1); // Original casing preserve karo
+      usedIndices.add(exactMatchIndex);
+      addedOptions.add(cleanOpt1);
+    }
+  });
+  
+  // Second pass: semantic matches (baki options ke liye)
+  options1.forEach((opt1) => {
+    const cleanOpt1 = opt1.trim().toLowerCase();
+    if (addedOptions.has(cleanOpt1)) return; // Already added
+    
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
+      if (addedOptions.has(cleanOpt1)) return;
       
-      // Naye strong matching function use karo
-      if (areOptionsStronglySimilar(opt1, opt2)) {
+      if (isSemanticallySimilarOption(opt1, opt2)) {
         common.push(opt1);
         usedIndices.add(j);
+        addedOptions.add(cleanOpt1);
       }
     });
   });
