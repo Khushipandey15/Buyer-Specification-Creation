@@ -1,5 +1,4 @@
 import React from "react";
-import { Download } from "lucide-react";
 import type { ISQ } from "../types";
 
 interface Stage2ResultsProps {
@@ -10,7 +9,7 @@ interface Stage2ResultsProps {
   onDownloadExcel: () => void;
 }
 
-export default function Stage2Results({ isqs, onDownloadExcel }: Stage2ResultsProps) {
+export default function Stage2Results({ isqs }: Stage2ResultsProps) {
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Stage 2: ISQ Extraction Complete</h2>
@@ -55,16 +54,6 @@ export default function Stage2Results({ isqs, onDownloadExcel }: Stage2ResultsPr
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="bg-gray-50 border border-gray-200 p-6 rounded-lg">
-          <button
-            onClick={onDownloadExcel}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-lg hover:from-green-700 hover:to-green-800 transition"
-          >
-            <Download size={20} />
-            Download Excel Report
-          </button>
         </div>
       </div>
     </div>
