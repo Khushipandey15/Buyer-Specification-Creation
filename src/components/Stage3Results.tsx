@@ -617,7 +617,27 @@ function normalizeSpecName(name: string): string {
   // Remove special characters
   normalized = normalized.replace(/[()\-_,.;]/g, ' ');
   
-  // Standardize common terms
+  // ✅ NEW: Handle plurals
+  const words = normalized.split(/\s+/).filter(w => w.length > 0);
+  const singularWords = words.map(word => {
+    // Handle common plural endings
+    if (word.endsWith('s') && !word.endsWith('ss')) {
+      return word.slice(0, -1); // bolts -> bolt
+    }
+    if (word.endsWith('ies')) {
+      return word.slice(0, -3) + 'y'; // categories -> category
+    }
+    if (word.endsWith('es')) {
+      const base = word.slice(0, -2);
+      // Check if removing 'es' makes sense
+      if (['ss', 'x', 'ch', 'sh'].some(suffix => base.endsWith(suffix))) {
+        return base; // boxes -> box, churches -> church
+      }
+    }
+    return word;
+  });
+  
+  // Standardize common terms (expanded list)
   const standardizations: Record<string, string> = {
     'material': 'material',
     'grade': 'grade',
@@ -649,12 +669,31 @@ function normalizeSpecName(name: string): string {
     'pattern': 'pattern',
     'design': 'design',
     'application': 'application',
-    'usage': 'application'
+    'usage': 'application',
+    // ✅ NEW: Product type synonyms
+    'bolt': 'bolt',
+    'bolts': 'bolt',
+    'stud': 'stud',
+    'studs': 'stud',
+    'nut': 'nut',
+    'nuts': 'nut',
+    'screw': 'bolt',
+    'fastener': 'bolt',
+    'pipe': 'pipe',
+    'pipes': 'pipe',
+    'tube': 'pipe',
+    'sheet': 'sheet',
+    'sheets': 'sheet',
+    'plate': 'sheet',
+    'rod': 'rod',
+    'rods': 'rod',
+    'bar': 'rod',
+    'wire': 'wire',
+    'wires': 'wire',
+    'cable': 'wire'
   };
   
-  // Split into words and standardize
-  const words = normalized.split(/\s+/).filter(w => w.length > 0);
-  const standardizedWords = words.map(word => {
+  const standardizedWords = singularWords.map(word => {
     if (standardizations[word]) {
       return standardizations[word];
     }
@@ -672,7 +711,7 @@ function normalizeSpecName(name: string): string {
   const uniqueWords = [...new Set(standardizedWords)];
   
   // Remove common filler words
-  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'in', 'for', 'of', 'the'];
+  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'wire', 'cable', 'bolt', 'nut', 'stud', 'screw', 'in', 'for', 'of', 'the', 'and', 'or'];
   const filteredWords = uniqueWords.filter(word => !fillerWords.includes(word));
   
   return filteredWords.join(' ').trim();
