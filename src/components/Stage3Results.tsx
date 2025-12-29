@@ -79,7 +79,7 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
                 <span className="inline-block w-8 h-8 bg-amber-300 rounded-full flex items-center justify-center text-amber-900 text-sm font-bold">
                   {buyerISQs.length}
                 </span>
-                Key Buyer ISQs
+                Buyer ISQs
               </h3>
               <p className="text-xs text-amber-700 mb-4">Selected from common specs based on buyer search patterns</p>
 
@@ -167,156 +167,343 @@ function extractCommonAndBuyerSpecs(
   stage1: Stage1Output,
   isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
 ): { commonSpecs: CommonSpecItem[]; buyerISQs: BuyerISQItem[] } {
-  const stage2ISQNamesExact = new Set([
-    isqs.config.name,
-    ...isqs.keys.map((k) => k.name),
-  ]);
-
-  const stage2ISQNormalized = new Map<string, string>();
-  stage2ISQNamesExact.forEach((name) => {
-    stage2ISQNormalized.set(normalizeSpecName(name), name);
-  });
-
-  const primarySpecs: CommonSpecItem[] = [];
-  const secondarySpecs: CommonSpecItem[] = [];
-  const stage1SpecMap = new Map<string, ISQ>();
-
+  // Collect all stage2 ISQs
+  const stage2ISQs = [isqs.config, ...isqs.keys, ...isqs.buyers];
+  
+  const stage1AllSpecs: Array<{
+    spec_name: string;
+    options: string[];
+    input_type: string;
+    tier: 'Primary' | 'Secondary' | 'Tertiary';
+  }> = [];
+  
+  // Extract all specs from stage1
   stage1.seller_specs.forEach((ss) => {
     ss.mcats.forEach((mcat) => {
       const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
-
+      
       finalized_primary_specs.specs.forEach((spec) => {
-        const normalizedName = normalizeSpecName(spec.spec_name);
-        const stage2Match = stage2ISQNormalized.has(normalizedName);
-
-        if (stage2Match) {
-          const filteredOptions = filterOptions(spec.options, isqs, spec.spec_name);
-          primarySpecs.push({
-            spec_name: spec.spec_name,
-            options: filteredOptions,
-            input_type: spec.input_type,
-            category: "Primary",
-          });
-          stage1SpecMap.set(normalizedName, {
-            name: spec.spec_name,
-            options: spec.options,
-          });
-        }
+        stage1AllSpecs.push({
+          spec_name: spec.spec_name,
+          options: spec.options,
+          input_type: spec.input_type,
+          tier: 'Primary'
+        });
       });
-
+      
       finalized_secondary_specs.specs.forEach((spec) => {
-        const normalizedName = normalizeSpecName(spec.spec_name);
-        const stage2Match = stage2ISQNormalized.has(normalizedName);
-
-        if (stage2Match) {
-          const filteredOptions = filterOptions(spec.options, isqs, spec.spec_name);
-          secondarySpecs.push({
-            spec_name: spec.spec_name,
-            options: filteredOptions,
-            input_type: spec.input_type,
-            category: "Secondary",
-          });
-          stage1SpecMap.set(normalizedName, {
-            name: spec.spec_name,
-            options: spec.options,
-          });
-        }
+        stage1AllSpecs.push({
+          spec_name: spec.spec_name,
+          options: spec.options,
+          input_type: spec.input_type,
+          tier: 'Secondary'
+        });
       });
     });
   });
-
-  const stage2ConfigKeyNormalized = new Set(
-    Array.from(stage2ISQNormalized.keys())
-  );
-
-  const buyerISQs = selectTopBuyerISQs(
-    primarySpecs,
-    secondarySpecs,
-    stage2ConfigKeyNormalized
-  );
-
+  
+  // Find semantically common specs
+  const commonSpecs: CommonSpecItem[] = [];
+  const matchedStage1 = new Set<number>();
+  const matchedStage2 = new Set<number>();
+  
+  stage1AllSpecs.forEach((stage1Spec, i) => {
+    stage2ISQs.forEach((stage2ISQ, j) => {
+      if (matchedStage2.has(j)) return;
+      
+      if (isSemanticallySimilar(stage1Spec.spec_name, stage2ISQ.name)) {
+        matchedStage1.add(i);
+        matchedStage2.add(j);
+        
+        // For common specs: bas common options (jitne hain sab)
+        const commonOptions = findCommonOptionsOnly(stage1Spec.options, stage2ISQ.options);
+        
+        if (commonOptions.length > 0) {
+          commonSpecs.push({
+            spec_name: stage1Spec.spec_name,
+            options: commonOptions,
+            input_type: stage1Spec.input_type,
+            category: stage1Spec.tier
+          });
+        }
+      }
+    });
+  });
+  
+  // Select buyer ISQs from common specs
+  const buyerISQs = selectTopBuyerISQsSemantic(commonSpecs, stage2ISQs);
+  
+  // Now update buyer ISQs with optimized 8 options
+  const optimizedBuyerISQs = buyerISQs.map(buyerISQ => {
+    // Find the corresponding Stage 2 ISQ for this buyer ISQ
+    const correspondingStage2ISQ = stage2ISQs.find(isq => 
+      isSemanticallySimilar(buyerISQ.spec_name, isq.name)
+    );
+    
+    // Find the original Stage 1 spec for this buyer ISQ
+    const originalStage1Spec = stage1AllSpecs.find(spec => 
+      isSemanticallySimilar(spec.spec_name, buyerISQ.spec_name)
+    );
+    
+    if (correspondingStage2ISQ && originalStage1Spec) {
+      // Get 8 optimized options for Buyer ISQs (common + stage1 unique)
+      const buyerOptions = getBuyerISQOptions(
+        originalStage1Spec.options,
+        correspondingStage2ISQ.options
+      );
+      
+      return {
+        ...buyerISQ,
+        options: buyerOptions
+      };
+    }
+    
+    return buyerISQ;
+  });
+  
   return {
-    commonSpecs: [...primarySpecs, ...secondarySpecs],
-    buyerISQs,
+    commonSpecs,  // Original common options only (jitne hain sab)
+    buyerISQs: optimizedBuyerISQs  // Optimized 8 options for Buyer ISQs
   };
 }
 
-function normalizeSpecName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/sheet|plate|material|thickness|thk|type|shape|perforation|hole/g, "")
-    .trim();
-}
-
-function selectTopBuyerISQs(
-  primarySpecs: CommonSpecItem[],
-  secondarySpecs: CommonSpecItem[],
-  stage2ConfigKeyNormalized: Set<string>
-): BuyerISQItem[] {
-  const candidates: Array<{
-    spec_name: string;
-    options: string[];
-    category: "Primary" | "Secondary";
-    priority: number;
-  }> = [];
-
-  primarySpecs.forEach((spec) => {
-    const normalizedName = normalizeSpecName(spec.spec_name);
-    const isConfigKey = stage2ConfigKeyNormalized.has(normalizedName);
-    const priority = isConfigKey ? 0 : 1;
-
-    candidates.push({
-      spec_name: spec.spec_name,
-      options: spec.options,
-      category: "Primary",
-      priority,
-    });
-  });
-
-  secondarySpecs.forEach((spec) => {
-    const normalizedName = normalizeSpecName(spec.spec_name);
-    const isConfigKey = stage2ConfigKeyNormalized.has(normalizedName);
-    const priority = isConfigKey ? 2 : 3;
-
-    candidates.push({
-      spec_name: spec.spec_name,
-      options: spec.options,
-      category: "Secondary",
-      priority,
-    });
-  });
-
-  candidates.sort((a, b) => a.priority - b.priority);
-
-  return candidates.slice(0, 2) as BuyerISQItem[];
-}
-
-function filterOptions(
-  allOptions: string[],
-  isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] },
-  specName: string
-): string[] {
-  const stage2Options = new Set<string>();
-
-  if (isqs.config.name === specName) {
-    isqs.config.options.forEach((opt) => stage2Options.add(opt));
+function isSemanticallySimilar(spec1: string, spec2: string): boolean {
+  const norm1 = normalizeSpecName(spec1);
+  const norm2 = normalizeSpecName(spec2);
+  
+  if (norm1 === norm2) return true;
+  
+  // Check if one contains the other
+  if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
+  
+  // Check for synonym groups
+  const synonymGroups = [
+    ['material', 'composition', 'fabric'],
+    ['grade', 'quality', 'class', 'standard'],
+    ['thickness', 'thk', 'gauge'],
+    ['size', 'dimension', 'measurement'],
+    ['diameter', 'dia', 'bore'],
+    ['length', 'long', 'lng'],
+    ['width', 'breadth', 'wide'],
+    ['height', 'high', 'depth'],
+    ['color', 'colour', 'shade'],
+    ['finish', 'surface', 'coating', 'polish'],
+    ['weight', 'wt', 'mass'],
+    ['type', 'kind', 'variety', 'style'],
+    ['shape', 'form', 'profile'],
+    ['hole', 'perforation', 'aperture'],
+    ['pattern', 'design', 'arrangement'],
+    ['application', 'use', 'purpose', 'usage']
+  ];
+  
+  for (const group of synonymGroups) {
+    const hasSpec1 = group.some(word => norm1.includes(word));
+    const hasSpec2 = group.some(word => norm2.includes(word));
+    if (hasSpec1 && hasSpec2) return true;
   }
-  isqs.keys.forEach((key) => {
-    if (key.name === specName) {
-      key.options.forEach((opt) => stage2Options.add(opt));
-    }
-  });
-  isqs.buyers.forEach((buyer) => {
-    if (buyer.name === specName) {
-      buyer.options.forEach((opt) => stage2Options.add(opt));
-    }
-  });
+  
+  return false;
+}
 
-  const commonOptions = allOptions.filter((opt) => stage2Options.has(opt));
-  const remainingOptions = allOptions.filter((opt) => !stage2Options.has(opt));
+function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
+  const normalize = (str: string) => 
+    str.toLowerCase()
+      .replace(/^ss\s*/i, '')
+      .replace(/^ms\s*/i, '')
+      .replace(/^astm\s*/i, '')
+      .replace(/^is\s*/i, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+  
+  const norm1 = normalize(opt1);
+  const norm2 = normalize(opt2);
+  
+  if (norm1 === norm2) return true;
+  
+  // Check for numeric equivalence (e.g., "10mm" vs "10 mm" vs "10")
+  const num1 = norm1.match(/\d+/)?.[0];
+  const num2 = norm2.match(/\d+/)?.[0];
+  if (num1 && num2 && num1 === num2) {
+    // Check if they're the same unit type
+    const hasMm1 = norm1.includes('mm') || norm1.includes('millimeter');
+    const hasMm2 = norm2.includes('mm') || norm2.includes('millimeter');
+    const hasCm1 = norm1.includes('cm') || norm1.includes('centimeter');
+    const hasCm2 = norm2.includes('cm') || norm2.includes('centimeter');
+    
+    if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
 
-  const combined = [...commonOptions, ...remainingOptions];
-  return combined.slice(0, 8);
+// For Common Specs: Bas common options only (jitne hain sab)
+function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
+  const common: string[] = [];
+  const usedIndices = new Set<number>();
+  
+  options1.forEach((opt1) => {
+    options2.forEach((opt2, j) => {
+      if (usedIndices.has(j)) return;
+      if (isSemanticallySimilarOption(opt1, opt2)) {
+        common.push(opt1);
+        usedIndices.add(j);
+      }
+    });
+  });
+  
+  return common; // Jitne hain sab common options return karo
+}
+
+// For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
+function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
+  const result: string[] = [];
+  const used = new Set<string>();
+  
+  // Phase 1: Find and add common options first
+  const matchedStage2Indices = new Set<number>();
+  
+  stage1Options.forEach((opt1) => {
+    stage2Options.forEach((opt2, j) => {
+      if (result.length >= 8) return;
+      if (matchedStage2Indices.has(j)) return;
+      
+      if (isSemanticallySimilarOption(opt1, opt2)) {
+        result.push(opt1);
+        used.add(opt1.toLowerCase());
+        matchedStage2Indices.add(j);
+      }
+    });
+  });
+  
+  // Phase 2: Add remaining Stage 1 options
+  if (result.length < 8) {
+    stage1Options.forEach(opt1 => {
+      if (result.length >= 8) return;
+      const optLower = opt1.toLowerCase();
+      if (!used.has(optLower)) {
+        result.push(opt1);
+        used.add(optLower);
+      }
+    });
+  }
+  
+  // Phase 3: If still less than 8, add Stage 2 options
+  if (result.length < 8) {
+    stage2Options.forEach((opt2, j) => {
+      if (result.length >= 8) return;
+      if (!matchedStage2Indices.has(j)) {
+        const optLower = opt2.toLowerCase();
+        if (!used.has(optLower)) {
+          result.push(opt2);
+          used.add(optLower);
+        }
+      }
+    });
+  }
+  
+  return result.slice(0, 8);
+}
+
+function selectTopBuyerISQsSemantic(
+  commonSpecs: CommonSpecItem[],
+  stage2ISQs: ISQ[]
+): BuyerISQItem[] {
+  // Score each common spec based on importance
+  const scoredSpecs = commonSpecs.map(spec => {
+    let score = 0;
+    
+    // Tier priority
+    if (spec.category === 'Primary') score += 3;
+    if (spec.category === 'Secondary') score += 1;
+    
+    // Option count
+    score += Math.min(spec.options.length, 5);
+    
+    // Check if it's in stage2 config or keys (higher importance)
+    const isInStage2Important = stage2ISQs.some(isq => 
+      isSemanticallySimilar(spec.spec_name, isq.name)
+    );
+    if (isInStage2Important) score += 2;
+    
+    return { ...spec, score };
+  });
+  
+  // Sort by score descending
+  scoredSpecs.sort((a, b) => b.score - a.score);
+  
+  // Take top 2
+  return scoredSpecs.slice(0, 2).map(spec => ({
+    spec_name: spec.spec_name,
+    options: spec.options, // This will be replaced later with optimized options
+    category: spec.category
+  }));
+}
+
+function normalizeSpecName(name: string): string {
+  let normalized = name.toLowerCase().trim();
+  
+  // Remove special characters
+  normalized = normalized.replace(/[()\-_,.;]/g, ' ');
+  
+  // Standardize common terms
+  const standardizations: Record<string, string> = {
+    'material': 'material',
+    'grade': 'grade',
+    'thk': 'thickness',
+    'thickness': 'thickness',
+    'type': 'type',
+    'shape': 'shape',
+    'size': 'size',
+    'dimension': 'size',
+    'length': 'length',
+    'width': 'width',
+    'height': 'height',
+    'dia': 'diameter',
+    'diameter': 'diameter',
+    'color': 'color',
+    'colour': 'color',
+    'finish': 'finish',
+    'surface': 'finish',
+    'weight': 'weight',
+    'wt': 'weight',
+    'capacity': 'capacity',
+    'brand': 'brand',
+    'model': 'model',
+    'quality': 'quality',
+    'standard': 'standard',
+    'specification': 'spec',
+    'perforation': 'hole',
+    'hole': 'hole',
+    'pattern': 'pattern',
+    'design': 'design',
+    'application': 'application',
+    'usage': 'application'
+  };
+  
+  // Split into words and standardize
+  const words = normalized.split(/\s+/).filter(w => w.length > 0);
+  const standardizedWords = words.map(word => {
+    if (standardizations[word]) {
+      return standardizations[word];
+    }
+    
+    for (const [key, value] of Object.entries(standardizations)) {
+      if (word.includes(key) || key.includes(word)) {
+        return value;
+      }
+    }
+    
+    return word;
+  });
+  
+  // Remove duplicates
+  const uniqueWords = [...new Set(standardizedWords)];
+  
+  // Remove common filler words
+  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'in', 'for', 'of', 'the'];
+  const filteredWords = uniqueWords.filter(word => !fillerWords.includes(word));
+  
+  return filteredWords.join(' ').trim();
 }

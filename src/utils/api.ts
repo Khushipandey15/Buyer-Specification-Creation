@@ -1,14 +1,98 @@
 import type { InputData, Stage1Output, ISQ, ExcelData } from "../types";
 
 function normalizeSpecName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/sheet|plate|material/g, "")
-    .replace(/perforation/g, "hole")
-    .replace(/thk/g, "thickness")
-    .replace(/type/g, "shape")
-    .replace(/\s+/g, " ")
-    .trim();
+  let normalized = name.toLowerCase().trim();
+  normalized = normalized.replace(/[()\-_,.;]/g, ' ');
+  
+  const standardizations: Record<string, string> = {
+    'material': 'material',
+    'grade': 'grade',
+    'thk': 'thickness',
+    'thickness': 'thickness',
+    'type': 'type',
+    'shape': 'shape',
+    'size': 'size',
+    'dimension': 'size',
+    'length': 'length',
+    'width': 'width',
+    'height': 'height',
+    'dia': 'diameter',
+    'diameter': 'diameter',
+    'color': 'color',
+    'colour': 'color',
+    'finish': 'finish',
+    'surface': 'finish',
+    'weight': 'weight',
+    'wt': 'weight',
+    'capacity': 'capacity',
+    'brand': 'brand',
+    'model': 'model',
+    'quality': 'quality',
+    'standard': 'standard',
+    'specification': 'spec',
+    'perforation': 'hole',
+    'hole': 'hole',
+    'pattern': 'pattern',
+    'design': 'design',
+    'application': 'application',
+    'usage': 'application'
+  };
+  
+  const words = normalized.split(/\s+/).filter(w => w.length > 0);
+  const standardizedWords = words.map(word => {
+    if (standardizations[word]) {
+      return standardizations[word];
+    }
+    
+    for (const [key, value] of Object.entries(standardizations)) {
+      if (word.includes(key) || key.includes(word)) {
+        return value;
+      }
+    }
+    
+    return word;
+  });
+  
+  const uniqueWords = [...new Set(standardizedWords)];
+  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'in', 'for', 'of', 'the'];
+  const filteredWords = uniqueWords.filter(word => !fillerWords.includes(word));
+  
+  return filteredWords.join(' ').trim();
+}
+
+function isSemanticallySimilar(spec1: string, spec2: string): boolean {
+  const norm1 = normalizeSpecName(spec1);
+  const norm2 = normalizeSpecName(spec2);
+  
+  if (norm1 === norm2) return true;
+  if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
+  
+  const synonymGroups = [
+    ['material', 'composition', 'fabric'],
+    ['grade', 'quality', 'class', 'standard'],
+    ['thickness', 'thk', 'gauge'],
+    ['size', 'dimension', 'measurement'],
+    ['diameter', 'dia', 'bore'],
+    ['length', 'long', 'lng'],
+    ['width', 'breadth', 'wide'],
+    ['height', 'high', 'depth'],
+    ['color', 'colour', 'shade'],
+    ['finish', 'surface', 'coating', 'polish'],
+    ['weight', 'wt', 'mass'],
+    ['type', 'kind', 'variety', 'style'],
+    ['shape', 'form', 'profile'],
+    ['hole', 'perforation', 'aperture'],
+    ['pattern', 'design', 'arrangement'],
+    ['application', 'use', 'purpose', 'usage']
+  ];
+  
+  for (const group of synonymGroups) {
+    const hasSpec1 = group.some(word => norm1.includes(word));
+    const hasSpec2 = group.some(word => norm2.includes(word));
+    if (hasSpec1 && hasSpec2) return true;
+  }
+  
+  return false;
 }
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -43,7 +127,6 @@ async function fetchWithRetry(
 
   throw new Error("Unreachable");
 }
-
 
 function extractJSONFromGemini(response) {
   try {
@@ -95,7 +178,6 @@ function extractJSONFromGemini(response) {
     return null;
   }
 }
-
 
 const STAGE1_API_KEY = (import.meta.env.VITE_STAGE1_API_KEY || "").trim();
 const STAGE2_API_KEY = (import.meta.env.VITE_STAGE2_API_KEY || "").trim();
@@ -315,11 +397,8 @@ function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
 }
 
 function extractJSON(text: string): string | null {
+  text = text.replace(/```json|```/gi, "").trim();
 
-  // Start of function
-text = text.replace(/```json|```/gi, "").trim();
-
-  // First, try the whole text as-is (might be raw JSON)
   text = text.trim();
   if (text.startsWith('{')) {
     try {
@@ -330,7 +409,6 @@ text = text.replace(/```json|```/gi, "").trim();
     }
   }
 
-  // Try markdown code block with json label
   let codeBlockMatch = text.match(/```json\s*\n?([\s\S]*?)\n?```/);
   if (codeBlockMatch) {
     const extracted = codeBlockMatch[1].trim();
@@ -342,7 +420,6 @@ text = text.replace(/```json|```/gi, "").trim();
     }
   }
 
-  // Try markdown code block without language
   codeBlockMatch = text.match(/```\s*\n?([\s\S]*?)\n?```/);
   if (codeBlockMatch) {
     const extracted = codeBlockMatch[1].trim();
@@ -354,7 +431,6 @@ text = text.replace(/```json|```/gi, "").trim();
     }
   }
 
-  // Try to find JSON by looking for { and }
   let braceCount = 0;
   let inString = false;
   let escapeNext = false;
@@ -398,7 +474,6 @@ text = text.replace(/```json|```/gi, "").trim();
     }
   }
 
-  // If nothing found, log the response for debugging
   console.error("No JSON found in response. Raw response:", text.substring(0, 1000));
   return null;
 }
@@ -407,7 +482,6 @@ async function fetchURL(url: string): Promise<string> {
   try {
     const response = await fetch(url);
     const html = await response.text();
-    // Extract visible text from HTML
     const doc = new DOMParser().parseFromString(html, "text/html");
     return doc.body.textContent || "";
   } catch {
@@ -480,7 +554,7 @@ Output must start with { and end with }.
         > **Spec Name**: Material  
         **Spec Option**: 100 kg
 
-* **No option should be created with vague keywords like “custom”, “unbranded” , “other” etc. An option must always fit with the product of the category**  
+* **No option should be created with vague keywords like "custom", "unbranded" , "other" etc. An option must always fit with the product of the category**  
     * **Example**: 
         > **Spec Name**: Brand Name  
         **Spec Option**: unbranded
@@ -539,7 +613,7 @@ STRICT FORMAT RULES:
 REQUIRED JSON SCHEMA (match keys + nesting exactly)
 
 {
- “seller_specs”: [
+ "seller_specs": [
  {
   "pmcat_id": {{$json["pmcat_id"]}},
   "pmcat_name": "{{$json["pmcat_name"]}}",
@@ -626,125 +700,466 @@ RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just ra
 }`;
 }
 
+// ============================================
+// STAGE 3 BUYER ISQs SELECTION - SIMPLIFIED VERSION
+// ============================================
+
 export function selectStage3BuyerISQs(
   stage1: Stage1Output,
   stage2: { config: ISQ; keys: ISQ[]; buyers?: ISQ[] }
 ): ISQ[] {
-  // 1️⃣ Flatten Stage1 specs with tier info
-  const stage1All: (ISQ & { tier: string; normName: string })[] = [];
+  console.log('🔍 selectStage3BuyerISQs called');
+
+  // 1️⃣ Flatten Stage1 specs
+  const stage1All: (ISQ & { tier: string; normName: string; spec_name?: string })[] = [];
   stage1.seller_specs.forEach(ss => {
     ss.mcats.forEach(mcat => {
       const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
 
-      finalized_primary_specs.specs.forEach(s =>
-        stage1All.push({ ...s, tier: "Primary", normName: normalizeSpecName(s.spec_name) })
-      );
-      finalized_secondary_specs.specs.forEach(s =>
-        stage1All.push({ ...s, tier: "Secondary", normName: normalizeSpecName(s.spec_name) })
-      );
+      finalized_primary_specs.specs.forEach(s => {
+        if (s.options && s.options.length > 0) {
+          stage1All.push({ 
+            name: s.spec_name,
+            spec_name: s.spec_name,
+            options: s.options,
+            tier: "Primary", 
+            normName: normalizeSpecName(s.spec_name)
+          });
+        }
+      });
+      
+      finalized_secondary_specs.specs.forEach(s => {
+        if (s.options && s.options.length > 0) {
+          stage1All.push({ 
+            name: s.spec_name,
+            spec_name: s.spec_name,
+            options: s.options,
+            tier: "Secondary", 
+            normName: normalizeSpecName(s.spec_name)
+          });
+        }
+      });
     });
   });
 
   // 2️⃣ Flatten Stage2 specs
   const stage2All: (ISQ & { normName: string })[] = [
-    stage2.config,
-    ...stage2.keys,
-    ...(stage2.buyers || [])
-  ].map(s => ({ ...s, normName: normalizeSpecName(s.name) }));
+    { ...stage2.config, options: stage2.config.options || [] },
+    ...stage2.keys.map(k => ({ ...k, options: k.options || [] }))
+  ]
+  .filter(s => s.options && s.options.length > 0)
+  .map(s => ({ 
+    ...s, 
+    normName: normalizeSpecName(s.name),
+    options: s.options
+  }));
+
+  console.log('📊 Stage1 specs:', stage1All.length);
+  console.log('📊 Stage2 specs:', stage2All.length);
 
   // 3️⃣ Find common specs
-  const commonSpecs = stage1All.filter(s1 =>
+  const commonSpecs = stage1All.filter(s1 => 
     stage2All.some(s2 => s2.normName === s1.normName)
   );
 
+  console.log('🎯 Common specs found:', commonSpecs.length);
+  commonSpecs.forEach(s => console.log(`   - ${s.spec_name}`));
+
+  if (commonSpecs.length === 0) {
+    console.log('⚠️ No common specs found');
+    return [];
+  }
+
   // 4️⃣ Select top 2 buyer ISQs
-  // Priority: Stage1 Primary → Stage1 Secondary
-  let primarySpec = commonSpecs.find(s => s.tier === "Primary");
-  if (!primarySpec) {
-    primarySpec = commonSpecs.find(s => s.tier === "Secondary");
-  }
-
-  const secondarySpec = commonSpecs.find(
-    s => s.normName !== primarySpec?.normName
-  );
-
-  // 5️⃣ Merge top 8 options: Stage2 first, Stage1 supplement
-  function getTopOptions(normName: string) {
-    const s2 = stage2All.find(s => s.normName === normName);
-    const s1 = stage1All.find(s => s.normName === normName);
-
-    let options: string[] = [];
-    if (s2?.options) options.push(...s2.options);
-    if (s1?.options) {
-      const needed = 8 - options.length;
-      const additional = s1.options.filter(o => !options.includes(o)).slice(0, needed);
-      options.push(...additional);
-    }
-
-    return [...new Set(options)].slice(0, 8);
-  }
-
   const buyerISQs: ISQ[] = [];
-  if (primarySpec)
-    buyerISQs.push({ name: primarySpec.name, options: getTopOptions(primarySpec.normName) });
-  if (secondarySpec)
-    buyerISQs.push({ name: secondarySpec.name, options: getTopOptions(secondarySpec.normName) });
+  const maxBuyers = Math.min(2, commonSpecs.length);
+  
+  for (let i = 0; i < maxBuyers; i++) {
+    const spec = commonSpecs[i];
+    console.log(`\n📦 Processing spec ${i+1}: ${spec.spec_name}`);
+    
+    const options = getBuyerISQOptions(spec.normName, stage1All, stage2All);
+    
+    if (options.length >= 2) {
+      buyerISQs.push({ 
+        name: spec.spec_name, 
+        options: options
+      });
+      console.log(`✅ Added buyer ISQ: ${spec.spec_name} with ${options.length} options`);
+    } else {
+      console.log(`❌ Skipped ${spec.spec_name}: only ${options.length} options`);
+    }
+  }
 
+  console.log('🎉 Final buyer ISQs:', buyerISQs.length);
   return buyerISQs;
 }
 
+// SIMPLE FUNCTION TO GET 8 OPTIONS FOR BUYER ISQ
+function getBuyerISQOptions(
+  normName: string, 
+  stage1All: (ISQ & { tier: string; normName: string; spec_name?: string })[],
+  stage2All: (ISQ & { normName: string })[]
+): string[] {
+  console.log(`🔧 Getting options for: "${normName}"`);
+  
+  const s2 = stage2All.find(s => s.normName === normName);
+  const s1 = stage1All.find(s => s.normName === normName);
 
-function extractSpecNames(stage1: Stage1Output): unknown[] {
-  const specs: unknown[] = [];
-  stage1.seller_specs.forEach((ss) => {
-    ss.mcats.forEach((mcat) => {
-      const { finalized_primary_specs, finalized_secondary_specs, finalized_tertiary_specs } =
-        mcat.finalized_specs;
-      finalized_primary_specs.specs.forEach((s) => specs.push({ name: s.spec_name, tier: "Primary" }));
-      finalized_secondary_specs.specs.forEach((s) => specs.push({ name: s.spec_name, tier: "Secondary" }));
-      finalized_tertiary_specs.specs.forEach((s) => specs.push({ name: s.spec_name, tier: "Tertiary" }));
-    });
-  });
-  return specs;
+  const stage1Options = s1?.options || [];
+  const stage2Options = s2?.options || [];
+  
+  console.log(`   Stage 1 options: ${stage1Options.length}`);
+  console.log(`   Stage 2 options: ${stage2Options.length}`);
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  // STEP 1: Add COMMON options (exist in BOTH Stage 1 and Stage 2)
+  console.log('   Step 1: Adding common options...');
+  
+  for (const s1Opt of stage1Options) {
+    if (result.length >= 8) break;
+    
+    const cleanS1 = s1Opt.trim().toLowerCase();
+    
+    for (const s2Opt of stage2Options) {
+      const cleanS2 = s2Opt.trim().toLowerCase();
+      
+      if (cleanS1 === cleanS2) {
+        // Found common option
+        const originalOpt = s1Opt.trim();
+        const lowerOpt = originalOpt.toLowerCase();
+        
+        if (!seen.has(lowerOpt)) {
+          result.push(originalOpt);
+          seen.add(lowerOpt);
+          console.log(`     ✅ Common: "${originalOpt}"`);
+        }
+        break;
+      }
+    }
+  }
+
+  // STEP 2: Add Stage 1 options
+  if (result.length < 8) {
+    console.log(`   Step 2: Adding Stage 1 options...`);
+    
+    for (const s1Opt of stage1Options) {
+      if (result.length >= 8) break;
+      
+      const cleanOpt = s1Opt.trim();
+      const lowerOpt = cleanOpt.toLowerCase();
+      
+      if (!seen.has(lowerOpt)) {
+        result.push(cleanOpt);
+        seen.add(lowerOpt);
+        console.log(`     ➕ Stage 1: "${cleanOpt}"`);
+      }
+    }
+  }
+
+  // STEP 3: GUARANTEE 8 OPTIONS
+  if (result.length < 8) {
+    console.log(`   Step 3: Adding fallbacks to reach 8...`);
+    
+    const fallbacks = getSmartFallbacks(normName);
+    
+    for (const fb of fallbacks) {
+      if (result.length >= 8) break;
+      
+      const lowerFb = fb.toLowerCase();
+      if (!seen.has(lowerFb)) {
+        result.push(fb);
+        seen.add(lowerFb);
+        console.log(`     📦 Fallback: "${fb}"`);
+      }
+    }
+  }
+
+  console.log(`   ✅ Final: ${result.length} options`);
+  return result;
 }
+
+// SMART FALLBACKS BASED ON SPEC TYPE
+function getSmartFallbacks(normName: string): string[] {
+  console.log(`   Getting fallbacks for: "${normName}"`);
+  
+  const fallbacks: Record<string, string[]> = {
+    'material': [
+      'SS 304', 'SS 316', 'Mild Steel', 'Galvanized Iron',
+      'Aluminium', 'Copper', 'Brass', 'PVC', 'Carbon Steel'
+    ],
+    'grade': [
+      '304', '316', '430', '201', '202', '304L', '316L',
+      'Grade A', 'Grade B', 'Commercial', 'Industrial'
+    ],
+    'thickness': [
+      '1mm', '2mm', '3mm', '5mm', '10mm', '15mm', '20mm', '25mm',
+      '0.5mm', '1.5mm', '4mm', '6mm', '8mm'
+    ],
+    'diameter': [
+      '15mm', '20mm', '25mm', '32mm', '40mm', '50mm',
+      '1/2"', '3/4"', '1"', '2"', '3"', '4"'
+    ],
+    'size': [
+      'Small', 'Medium', 'Large', 'Extra Large',
+      'Sheet', 'Plate', 'Coil', 'Pipe', 'Rod'
+    ],
+    'length': [
+      '6m', '12m', 'Random', 'Custom',
+      '3ft', '6ft', '10ft', '20ft', '1m', '2m'
+    ],
+    'width': [
+      '1000mm', '1250mm', '1500mm', '2000mm',
+      '3ft', '4ft', '5ft', '6ft'
+    ],
+    'height': [
+      '1000mm', '1500mm', '2000mm', '2500mm',
+      '3ft', '4ft', '5ft', '6ft'
+    ],
+    'color': [
+      'White', 'Black', 'Blue', 'Red', 'Green', 'Yellow',
+      'Gray', 'Silver', 'Gold', 'Brown'
+    ],
+    'finish': [
+      'Mill Finish', 'Polished', 'Galvanized', 'Brushed',
+      'Coated', 'Painted', 'Anodized', 'Matt'
+    ],
+    'type': [
+      'Standard', 'Premium', 'Economy', 'Commercial',
+      'Industrial', 'Heavy Duty', 'Light Duty', 'Custom'
+    ],
+    'shape': [
+      'Round', 'Square', 'Rectangular', 'Hexagonal',
+      'Flat', 'Angle', 'Channel', 'Pipe'
+    ],
+    'weight': [
+      '1kg', '5kg', '10kg', '25kg', '50kg', '100kg',
+      '500kg', '1000kg'
+    ],
+    'capacity': [
+      '10L', '20L', '50L', '100L', '200L', '500L',
+      '1000L', '2000L'
+    ],
+    'brand': [
+      'Tata', 'Jindal', 'SAIL', 'Essar', 'Hindalco',
+      'Godrej', 'Asian Paints', 'Berger'
+    ],
+    'quality': [
+      'Grade A', 'Grade B', 'Commercial', 'Industrial',
+      'Premium', 'Standard', 'Economy', 'Export Quality'
+    ]
+  };
+
+  // Find matching fallback
+  for (const [key, options] of Object.entries(fallbacks)) {
+    if (normName.includes(key)) {
+      console.log(`   Using "${key}" fallbacks`);
+      return options;
+    }
+  }
+
+  // Default fallback
+  console.log(`   Using default fallbacks`);
+  return [
+    'Standard', 'Premium', 'Economy', 'Commercial',
+    'Industrial', 'Custom', 'Type A', 'Type B',
+    'Small', 'Medium', 'Large', 'Extra Large'
+  ];
+}
+
+// ============================================
+// COMPARE RESULTS FUNCTION (unchanged)
+// ============================================
 
 export function compareResults(
   chatgptSpecs: Stage1Output,
   geminiSpecs: Stage1Output
-): { common_specs: string[]; chatgpt_unique_specs: string[]; gemini_unique_specs: string[] } {
-  const chatgptNames = extractAllSpecNames(chatgptSpecs);
-  const geminiNames = extractAllSpecNames(geminiSpecs);
+): {
+  common_specs: Array<{
+    spec_name: string;
+    chatgpt_name: string;
+    gemini_name: string;
+    common_options: string[];
+    chatgpt_unique_options: string[];
+    gemini_unique_options: string[];
+  }>;
+  chatgpt_unique_specs: Array<{ spec_name: string; options: string[] }>;
+  gemini_unique_specs: Array<{ spec_name: string; options: string[] }>;
+} {
+  const chatgptAllSpecs = extractAllSpecsWithOptions(chatgptSpecs);
+  const geminiAllSpecs = extractAllSpecsWithOptions(geminiSpecs);
 
-  const common = chatgptNames.filter(c =>
-    geminiNames.some(g => normalizeSpecName(g) === normalizeSpecName(c))
-  );
+  const commonSpecs: Array<{
+    spec_name: string;
+    chatgpt_name: string;
+    gemini_name: string;
+    common_options: string[];
+    chatgpt_unique_options: string[];
+    gemini_unique_options: string[];
+  }> = [];
 
-  const chatgptUnique = chatgptNames.filter(
-    c => !geminiNames.some(g => normalizeSpecName(g) === normalizeSpecName(c))
-  );
+  const chatgptUnique: Array<{ spec_name: string; options: string[] }> = [];
+  const geminiUnique: Array<{ spec_name: string; options: string[] }> = [];
 
-  const geminiUnique = geminiNames.filter(
-    g => !chatgptNames.some(c => normalizeSpecName(g) === normalizeSpecName(c))
-  );
+  const matchedChatgpt = new Set<number>();
+  const matchedGemini = new Set<number>();
+
+  chatgptAllSpecs.forEach((chatgptSpec, i) => {
+    let foundMatch = false;
+    
+    geminiAllSpecs.forEach((geminiSpec, j) => {
+      if (matchedGemini.has(j)) return;
+      
+      if (isSemanticallySimilar(chatgptSpec.spec_name, geminiSpec.spec_name)) {
+        matchedChatgpt.add(i);
+        matchedGemini.add(j);
+        foundMatch = true;
+        
+        const commonOpts = findCommonOptions(chatgptSpec.options, geminiSpec.options);
+        const chatgptUniq = chatgptSpec.options.filter(opt => 
+          !geminiSpec.options.some(gemOpt => isSemanticallySimilarOption(opt, gemOpt))
+        );
+        const geminiUniq = geminiSpec.options.filter(opt => 
+          !chatgptSpec.options.some(chatOpt => isSemanticallySimilarOption(opt, chatOpt))
+        );
+        
+        commonSpecs.push({
+          spec_name: chatgptSpec.spec_name,
+          chatgpt_name: chatgptSpec.spec_name,
+          gemini_name: geminiSpec.spec_name,
+          common_options: commonOpts,
+          chatgpt_unique_options: chatgptUniq,
+          gemini_unique_options: geminiUniq
+        });
+      }
+    });
+    
+    if (!foundMatch) {
+      chatgptUnique.push({
+        spec_name: chatgptSpec.spec_name,
+        options: chatgptSpec.options
+      });
+    }
+  });
+
+  geminiAllSpecs.forEach((geminiSpec, j) => {
+    if (!matchedGemini.has(j)) {
+      geminiUnique.push({
+        spec_name: geminiSpec.spec_name,
+        options: geminiSpec.options
+      });
+    }
+  });
 
   return {
-    common_specs: [...new Set(common)],
-    chatgpt_unique_specs: [...new Set(chatgptUnique)],
-    gemini_unique_specs: [...new Set(geminiUnique)],
+    common_specs: commonSpecs,
+    chatgpt_unique_specs: chatgptUnique,
+    gemini_unique_specs: geminiUnique,
   };
 }
 
-
-function extractAllSpecNames(specs: Stage1Output): string[] {
-  const names: string[] = [];
+// Helper functions
+function extractAllSpecsWithOptions(specs: Stage1Output): Array<{ spec_name: string; options: string[] }> {
+  const allSpecs: Array<{ spec_name: string; options: string[] }> = [];
+  
   specs.seller_specs.forEach((ss) => {
     ss.mcats.forEach((mcat) => {
       const { finalized_primary_specs, finalized_secondary_specs, finalized_tertiary_specs } =
         mcat.finalized_specs;
-      finalized_primary_specs.specs.forEach((s) => names.push(s.spec_name));
-      finalized_secondary_specs.specs.forEach((s) => names.push(s.spec_name));
-      finalized_tertiary_specs.specs.forEach((s) => names.push(s.spec_name));
+      
+      finalized_primary_specs.specs.forEach((s) => 
+        allSpecs.push({ spec_name: s.spec_name, options: s.options })
+      );
+      finalized_secondary_specs.specs.forEach((s) => 
+        allSpecs.push({ spec_name: s.spec_name, options: s.options })
+      );
+      finalized_tertiary_specs.specs.forEach((s) => 
+        allSpecs.push({ spec_name: s.spec_name, options: s.options })
+      );
     });
   });
-  return names;
+  
+  return allSpecs;
+}
+
+function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
+  if (!opt1 || !opt2) return false;
+  
+  const clean1 = opt1.toLowerCase().trim();
+  const clean2 = opt2.toLowerCase().trim();
+  
+  if (clean1 === clean2) return true;
+  if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
+  
+  const equivalences: Record<string, string[]> = {
+    '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
+    '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
+    'ss304': ['ss 304', 'stainless steel 304'],
+    'ss316': ['ss 316', 'stainless steel 316'],
+    'ms': ['mild steel', 'mildsteel', 'carbon steel'],
+    'gi': ['galvanized iron'],
+    'aluminium': ['aluminum'],
+    'mm': ['millimeter', 'millimetre', 'millimeters'],
+    'cm': ['centimeter', 'centimetre', 'centimeters'],
+    'm': ['meter', 'metre', 'meters'],
+    'inch': ['inches', '"'],
+    'ft': ['feet', 'foot'],
+    'standard': ['std', 'regular', 'normal'],
+    'premium': ['high quality', 'superior'],
+    'economy': ['budget', 'low cost'],
+  };
+  
+  for (const [base, alts] of Object.entries(equivalences)) {
+    const allVariants = [base, ...alts];
+    const hasOpt1 = allVariants.some(variant => clean1.includes(variant));
+    const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
+    
+    if (hasOpt1 && hasOpt2) {
+      const num1 = clean1.match(/(\d+\.?\d*)/)?.[0];
+      const num2 = clean2.match(/(\d+\.?\d*)/)?.[0];
+      
+      if (num1 && num2 && num1 !== num2) {
+        continue;
+      }
+      
+      return true;
+    }
+  }
+  
+  const numMatch1 = clean1.match(/(\d+\.?\d*)/);
+  const numMatch2 = clean2.match(/(\d+\.?\d*)/);
+  
+  if (numMatch1 && numMatch2 && numMatch1[0] === numMatch2[0]) {
+    const hasMm1 = clean1.includes('mm') || clean1.includes('millimeter');
+    const hasMm2 = clean2.includes('mm') || clean2.includes('millimeter');
+    const hasInch1 = clean1.includes('inch') || clean1.includes('"');
+    const hasInch2 = clean2.includes('inch') || clean2.includes('"');
+    const hasFt1 = clean1.includes('ft') || clean1.includes('feet');
+    const hasFt2 = clean2.includes('ft') || clean2.includes('feet');
+    
+    if ((hasMm1 && hasMm2) || (hasInch1 && hasInch2) || (hasFt1 && hasFt2)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function findCommonOptions(options1: string[], options2: string[]): string[] {
+  const common: string[] = [];
+  const usedIndices = new Set<number>();
+  
+  options1.forEach((opt1, i) => {
+    options2.forEach((opt2, j) => {
+      if (usedIndices.has(j)) return;
+      if (isSemanticallySimilarOption(opt1, opt2)) {
+        common.push(opt1);
+        usedIndices.add(j);
+      }
+    });
+  });
+  
+  return common;
 }
