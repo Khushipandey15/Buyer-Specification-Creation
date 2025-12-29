@@ -113,6 +113,24 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   if (norm1 === norm2) return true;
   if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
   
+  // ✅ NEW: Handle plural/singular matching
+  const handlePlural = (word: string): string => {
+    if (word.endsWith('s')) return word.slice(0, -1); // Remove 's'
+    if (word.endsWith('ies')) return word.slice(0, -3) + 'y'; // countries -> country
+    return word;
+  };
+  
+  const words1 = norm1.split(' ');
+  const words2 = norm2.split(' ');
+  
+  // Check if words are same after handling plurals
+  if (words1.length === 1 && words2.length === 1) {
+    const base1 = handlePlural(words1[0]);
+    const base2 = handlePlural(words2[0]);
+    if (base1 === base2) return true;
+  }
+  
+  // Check for synonym groups
   const synonymGroups = [
     ['material', 'composition', 'fabric'],
     ['grade', 'quality', 'class', 'standard'],
@@ -129,7 +147,15 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
     ['shape', 'form', 'profile'],
     ['hole', 'perforation', 'aperture'],
     ['pattern', 'design', 'arrangement'],
-    ['application', 'use', 'purpose', 'usage']
+    ['application', 'use', 'purpose', 'usage'],
+    // ✅ NEW: Add common product type synonyms
+    ['bolt', 'bolts', 'screw'],
+    ['stud', 'studs', 'pin'],
+    ['nut', 'nuts', 'fastener'],
+    ['pipe', 'pipes', 'tube'],
+    ['sheet', 'sheets', 'plate'],
+    ['rod', 'rods', 'bar'],
+    ['wire', 'wires', 'cable']
   ];
   
   for (const group of synonymGroups) {
@@ -140,7 +166,6 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   
   return false;
 }
-
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function fetchWithRetry(
