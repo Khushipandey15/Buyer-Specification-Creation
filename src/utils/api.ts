@@ -1308,12 +1308,51 @@ function findCommonOptions(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
   const usedIndices = new Set<number>();
   
+  // Also extract single values from ranges for comparison
+  const extractValuesFromRange = (rangeStr: string): string[] => {
+    const clean = rangeStr.toLowerCase();
+    const rangeMatch = clean.match(/(\d+(?:\.\d+)?)\s*(?:mm|cm|m|inch|ft)?\s*(?:to|\-|~|up to)\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|inch|ft)?/i);
+    if (!rangeMatch) return [];
+    
+    const unit = (rangeMatch[3] || 'mm').toLowerCase();
+    const min = parseFloat(rangeMatch[1]);
+    const max = parseFloat(rangeMatch[2]);
+    
+    // Generate common values within range
+    const commonValues: number[] = [];
+    for (let num = min; num <= max; num += 1) {
+      if (num <= max) {
+        commonValues.push(num);
+      }
+    }
+    
+    return commonValues.map(num => `${num} ${unit}`);
+  };
+  
   options1.forEach((opt1, i) => {
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
+      
+      // Direct match
       if (isSemanticallySimilarOption(opt1, opt2)) {
         common.push(opt1);
         usedIndices.add(j);
+      } 
+      // If opt1 is range, check if opt2 falls within it
+      else if (/to|\-|~|up to/i.test(opt1)) {
+        const rangeValues = extractValuesFromRange(opt1);
+        if (rangeValues.some(rangeValue => isSemanticallySimilarOption(rangeValue, opt2))) {
+          common.push(opt2); // Add the actual value, not range
+          usedIndices.add(j);
+        }
+      }
+      // If opt2 is range, check if opt1 falls within it
+      else if (/to|\-|~|up to/i.test(opt2)) {
+        const rangeValues = extractValuesFromRange(opt2);
+        if (rangeValues.some(rangeValue => isSemanticallySimilarOption(opt1, rangeValue))) {
+          common.push(opt1);
+          usedIndices.add(j);
+        }
       }
     });
   });
