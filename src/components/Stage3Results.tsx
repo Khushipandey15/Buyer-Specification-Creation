@@ -653,77 +653,24 @@ function selectTopBuyerISQsSemantic(
   // Sort by score descending
   scoredSpecs.sort((a, b) => b.score - a.score);
   
-  // Take top 2
-  return scoredSpecs.slice(0, 2).map(spec => ({
-    spec_name: spec.spec_name,
-    options: spec.options, // This will be replaced later with optimized options
-    category: spec.category
-  }));
-}
-
-function normalizeSpecName(name: string): string {
-  let normalized = name.toLowerCase().trim();
-  
-  // Remove special characters
-  normalized = normalized.replace(/[()\-_,.;]/g, ' ');
-  
-  // Standardize common terms
-  const standardizations: Record<string, string> = {
-    'material': 'material',
-    'grade': 'grade',
-    'thk': 'thickness',
-    'thickness': 'thickness',
-    'type': 'type',
-    'shape': 'shape',
-    'size': 'size',
-    'dimension': 'size',
-    'length': 'length',
-    'width': 'width',
-    'height': 'height',
-    'dia': 'diameter',
-    'diameter': 'diameter',
-    'color': 'color',
-    'colour': 'color',
-    'finish': 'finish',
-    'surface': 'finish',
-    'weight': 'weight',
-    'wt': 'weight',
-    'capacity': 'capacity',
-    'brand': 'brand',
-    'model': 'model',
-    'quality': 'quality',
-    'standard': 'standard',
-    'specification': 'spec',
-    'perforation': 'hole',
-    'hole': 'hole',
-    'pattern': 'pattern',
-    'design': 'design',
-    'application': 'application',
-    'usage': 'application'
-  };
-  
-  // Split into words and standardize
-  const words = normalized.split(/\s+/).filter(w => w.length > 0);
-  const standardizedWords = words.map(word => {
-    if (standardizations[word]) {
-      return standardizations[word];
-    }
+  // Take top 2 and remove duplicates from options
+  return scoredSpecs.slice(0, 2).map(spec => {
+    // Remove duplicate options from buyer ISQ
+    const uniqueOptions: string[] = [];
+    const seenOptions = new Set<string>();
     
-    for (const [key, value] of Object.entries(standardizations)) {
-      if (word.includes(key) || key.includes(word)) {
-        return value;
+    spec.options.forEach(option => {
+      const cleanOption = option.trim().toLowerCase();
+      if (!seenOptions.has(cleanOption)) {
+        uniqueOptions.push(option);
+        seenOptions.add(cleanOption);
       }
-    }
+    });
     
-    return word;
+    return {
+      spec_name: spec.spec_name,
+      options: uniqueOptions,
+      category: spec.category
+    };
   });
-  
-  // Remove duplicates
-  const uniqueWords = [...new Set(standardizedWords)];
-  
-  // Remove common filler words
-  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'in', 'for', 'of', 'the'];
-  const filteredWords = uniqueWords.filter(word => !fillerWords.includes(word));
-  
-  return filteredWords.join(' ').trim();
 }
