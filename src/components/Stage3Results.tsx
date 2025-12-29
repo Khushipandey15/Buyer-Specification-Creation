@@ -323,94 +323,98 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
 function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   if (!opt1 || !opt2) return false;
   
-  // Pehle basic cleaning
-  const clean1 = opt1.toLowerCase().trim();
-  const clean2 = opt2.toLowerCase().trim();
+  const clean1 = opt1.trim().toLowerCase();
+  const clean2 = opt2.trim().toLowerCase();
   
-  // Direct match check
+  // Direct match
   if (clean1 === clean2) return true;
   
-  // Remove spaces and check
+  // Remove extra spaces and compare
   const noSpace1 = clean1.replace(/\s+/g, '');
   const noSpace2 = clean2.replace(/\s+/g, '');
   if (noSpace1 === noSpace2) return true;
   
-  // Special cases for common terms
-  const equivalences: Record<string, string[]> = {
-    'round': ['circular', 'circle', 'round shape'],
-    'square': ['squared', 'square shape', 'box'],
-    'slotted': ['slot', 'slotted hole', 'with slot'],
-    'rectangular': ['rectangle', 'rectangular shape'],
-    'hexagonal': ['hexagon', 'hexagonal shape'],
-    'flat': ['flat shape', 'flat bar'],
-    'angle': ['l-shape', 'angle bar'],
-    'channel': ['c-shape', 'channel bar'],
-    'pipe': ['tubular', 'tube'],
-    '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
-    '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
-    'ss304': ['ss 304', 'stainless steel 304'],
-    'ss316': ['ss 316', 'stainless steel 316'],
-    'ms': ['mild steel', 'mildsteel', 'carbon steel'],
-    'gi': ['galvanized iron'],
-    'aluminium': ['aluminum'],
-  };
+  // Special cases for common materials
+  const materialEquivalences = [
+    ['ss304', 'ss 304', '304', 'stainless steel 304', 'stainless304'],
+    ['ss316', 'ss 316', '316', 'stainless steel 316', 'stainless316'],
+    ['ms', 'mild steel', 'mildsteel', 'carbon steel'],
+    ['gi', 'galvanized iron'],
+    ['aluminium', 'aluminum'],
+  ];
   
-  // Check if options are in equivalence groups
-  for (const [base, alts] of Object.entries(equivalences)) {
-    const allVariants = [base, ...alts];
-    
-    // Check if clean1 contains any variant
-    const hasOpt1 = allVariants.some(variant => {
-      const regex = new RegExp(`\\b${variant}\\b`, 'i');
-      return regex.test(clean1) || clean1.includes(variant);
-    });
-    
-    // Check if clean2 contains any variant
-    const hasOpt2 = allVariants.some(variant => {
-      const regex = new RegExp(`\\b${variant}\\b`, 'i');
-      return regex.test(clean2) || clean2.includes(variant);
-    });
+  for (const group of materialEquivalences) {
+    const hasOpt1 = group.some(variant => clean1.includes(variant));
+    const hasOpt2 = group.some(variant => clean2.includes(variant));
     
     if (hasOpt1 && hasOpt2) {
+      // Check if same grade/number
+      const num1 = clean1.match(/(\d+)/)?.[0];
+      const num2 = clean2.match(/(\d+)/)?.[0];
+      
+      if (num1 && num2 && num1 !== num2) {
+        return false; // Different grades
+      }
       return true;
     }
   }
   
-  // Check for partial matches (e.g., "round" in "round bar")
-  if (clean1.includes(clean2) || clean2.includes(clean1)) {
-    return true;
-  }
+  // For measurements with units
+  const extractMeasurement = (str: string) => {
+    const numMatch = str.match(/(\d+(\.\d+)?)/);
+    if (!numMatch) return null;
+    
+    const number = parseFloat(numMatch[1]);
+    const unit = str.replace(numMatch[0], '').trim();
+    
+    return { number, unit };
+  };
   
-  // For shape-related options, check common terms
-  const shapeTerms = ['round', 'square', 'slotted', 'rectangular', 'hexagonal', 'flat', 'angle', 'channel', 'pipe'];
-  const hasShape1 = shapeTerms.some(term => clean1.includes(term));
-  const hasShape2 = shapeTerms.some(term => clean2.includes(term));
+  const meas1 = extractMeasurement(clean1);
+  const meas2 = extractMeasurement(clean2);
   
-  if (hasShape1 && hasShape2) {
-    // Check if they contain the same shape term
-    for (const term of shapeTerms) {
-      if (clean1.includes(term) && clean2.includes(term)) {
-        return true;
-      }
+  if (meas1 && meas2 && meas1.number === meas2.number) {
+    // Same number, check units
+    const mmUnits = ['mm', 'millimeter', 'millimetre'];
+    const cmUnits = ['cm', 'centimeter', 'centimetre'];
+    const inchUnits = ['inch', 'in', '"', 'inches'];
+    const ftUnits = ['ft', 'feet', 'foot'];
+    
+    const isMm1 = mmUnits.some(u => meas1.unit.includes(u));
+    const isMm2 = mmUnits.some(u => meas2.unit.includes(u));
+    const isCm1 = cmUnits.some(u => meas1.unit.includes(u));
+    const isCm2 = cmUnits.some(u => meas2.unit.includes(u));
+    const isInch1 = inchUnits.some(u => meas1.unit.includes(u));
+    const isInch2 = inchUnits.some(u => meas2.unit.includes(u));
+    const isFt1 = ftUnits.some(u => meas1.unit.includes(u));
+    const isFt2 = ftUnits.some(u => meas2.unit.includes(u));
+    
+    if ((isMm1 && isMm2) || (isCm1 && isCm2) || 
+        (isInch1 && isInch2) || (isFt1 && isFt2) ||
+        (!isMm1 && !isCm1 && !isInch1 && !isFt1 && 
+         !isMm2 && !isCm2 && !isInch2 && !isFt2)) {
+      return true;
     }
   }
   
-  // Simple word-based similarity check
-  const words1 = clean1.split(/\s+/);
-  const words2 = clean2.split(/\s+/);
+  // For finishes like Mirror, Hairline, etc.
+  const finishEquivalences = [
+    ['mirror', 'mirror finish', 'polished mirror'],
+    ['hairline', 'hairline finish', 'brushed', 'brushed finish'],
+    ['mill', 'mill finish', 'mill finished'],
+    ['galvanized', 'gi', 'galvanized finish'],
+    ['powder', 'powder coated', 'powder coating'],
+  ];
   
-  // Check if any significant word matches
-  const commonWords = words1.filter(word => 
-    word.length > 2 && words2.includes(word)
-  );
-  
-  if (commonWords.length > 0) {
-    return true;
+  for (const group of finishEquivalences) {
+    const hasOpt1 = group.some(variant => clean1.includes(variant));
+    const hasOpt2 = group.some(variant => clean2.includes(variant));
+    
+    if (hasOpt1 && hasOpt2) return true;
   }
   
   return false;
 }
-
 
 function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
   if (!opt1 || !opt2) return false;
