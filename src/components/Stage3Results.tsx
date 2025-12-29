@@ -416,9 +416,31 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
   const common: string[] = [];
   const usedIndices = new Set<number>();
   
+  // Pehle direct matches check karo
   options1.forEach((opt1) => {
+    const cleanOpt1 = opt1.trim().toLowerCase();
+    
+    // Check for direct match in options2
+    const directMatchIndex = options2.findIndex((opt2, j) => {
+      if (usedIndices.has(j)) return false;
+      const cleanOpt2 = opt2.trim().toLowerCase();
+      return cleanOpt1 === cleanOpt2;
+    });
+    
+    if (directMatchIndex !== -1) {
+      common.push(opt1);
+      usedIndices.add(directMatchIndex);
+      return;
+    }
+  });
+  
+  // Phir semantic matches check karo
+  options1.forEach((opt1) => {
+    if (common.includes(opt1)) return; // Already added
+    
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
+      
       if (isSemanticallySimilarOption(opt1, opt2)) {
         common.push(opt1);
         usedIndices.add(j);
@@ -426,9 +448,8 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
     });
   });
   
-  return common; // Jitne hain sab common options return karo
+  return common;
 }
-
 // For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
 function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
   const result: string[] = [];
