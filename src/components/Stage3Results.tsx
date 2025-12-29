@@ -312,7 +312,7 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
       .replace(/^ms\s*/i, '')
       .replace(/^astm\s*/i, '')
       .replace(/^is\s*/i, '')
-      .replace(/[^a-z0-9]/g, '')
+      .replace(/[^a-z0-9.]/g, '')  // CHANGE: '.' ko include karo decimals ke liye
       .trim();
   
   const norm1 = normalize(opt1);
@@ -321,9 +321,23 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   if (norm1 === norm2) return true;
   
   // Check for numeric equivalence (e.g., "10mm" vs "10 mm" vs "10")
-  const num1 = norm1.match(/\d+/)?.[0];
-  const num2 = norm2.match(/\d+/)?.[0];
-  if (num1 && num2 && num1 === num2) {
+  // IMPROVED VERSION FOR DECIMALS
+  const extractNumberAndUnit = (str: string) => {
+    const numMatch = str.match(/(\d+(\.\d+)?)/); // DECIMALS SUPPORT
+    const unitMatch = str.match(/(mm|cm|millimeter|centimeter)/i);
+    return {
+      number: numMatch ? parseFloat(numMatch[1]) : null, // parseFloat for decimals
+      unit: unitMatch ? unitMatch[0].toLowerCase() : null
+    };
+  };
+  
+  const data1 = extractNumberAndUnit(opt1);
+  const data2 = extractNumberAndUnit(opt2);
+  
+  if (data1.number && data2.number) {
+    // Check if numbers are EXACTLY equal (1.2 != 12)
+    if (data1.number !== data2.number) return false;
+    
     // Check if they're the same unit type
     const hasMm1 = norm1.includes('mm') || norm1.includes('millimeter');
     const hasMm2 = norm2.includes('mm') || norm2.includes('millimeter');
@@ -331,6 +345,11 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     const hasCm2 = norm2.includes('cm') || norm2.includes('centimeter');
     
     if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2)) {
+      return true;
+    }
+    
+    // If both have no units but same number
+    if (!hasMm1 && !hasCm1 && !hasMm2 && !hasCm2 && data1.number === data2.number) {
       return true;
     }
   }
