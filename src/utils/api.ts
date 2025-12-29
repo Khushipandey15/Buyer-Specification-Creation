@@ -1080,13 +1080,29 @@ function extractAllSpecsWithOptions(specs: Stage1Output): Array<{ spec_name: str
 function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   if (!opt1 || !opt2) return false;
   
+  // Pehle basic cleaning
   const clean1 = opt1.toLowerCase().trim();
   const clean2 = opt2.toLowerCase().trim();
   
+  // Direct match check
   if (clean1 === clean2) return true;
-  if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
   
+  // Remove spaces and check
+  const noSpace1 = clean1.replace(/\s+/g, '');
+  const noSpace2 = clean2.replace(/\s+/g, '');
+  if (noSpace1 === noSpace2) return true;
+  
+  // Special cases for common terms
   const equivalences: Record<string, string[]> = {
+    'round': ['circular', 'circle', 'round shape'],
+    'square': ['squared', 'square shape', 'box'],
+    'slotted': ['slot', 'slotted hole', 'with slot'],
+    'rectangular': ['rectangle', 'rectangular shape'],
+    'hexagonal': ['hexagon', 'hexagonal shape'],
+    'flat': ['flat shape', 'flat bar'],
+    'angle': ['l-shape', 'angle bar'],
+    'channel': ['c-shape', 'channel bar'],
+    'pipe': ['tubular', 'tube'],
     '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
     '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
     'ss304': ['ss 304', 'stainless steel 304'],
@@ -1094,47 +1110,59 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
     'ms': ['mild steel', 'mildsteel', 'carbon steel'],
     'gi': ['galvanized iron'],
     'aluminium': ['aluminum'],
-    'mm': ['millimeter', 'millimetre', 'millimeters'],
-    'cm': ['centimeter', 'centimetre', 'centimeters'],
-    'm': ['meter', 'metre', 'meters'],
-    'inch': ['inches', '"'],
-    'ft': ['feet', 'foot'],
-    'standard': ['std', 'regular', 'normal'],
-    'premium': ['high quality', 'superior'],
-    'economy': ['budget', 'low cost'],
   };
   
+  // Check if options are in equivalence groups
   for (const [base, alts] of Object.entries(equivalences)) {
     const allVariants = [base, ...alts];
-    const hasOpt1 = allVariants.some(variant => clean1.includes(variant));
-    const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
+    
+    // Check if clean1 contains any variant
+    const hasOpt1 = allVariants.some(variant => {
+      const regex = new RegExp(`\\b${variant}\\b`, 'i');
+      return regex.test(clean1) || clean1.includes(variant);
+    });
+    
+    // Check if clean2 contains any variant
+    const hasOpt2 = allVariants.some(variant => {
+      const regex = new RegExp(`\\b${variant}\\b`, 'i');
+      return regex.test(clean2) || clean2.includes(variant);
+    });
     
     if (hasOpt1 && hasOpt2) {
-      const num1 = clean1.match(/(\d+\.?\d*)/)?.[0];
-      const num2 = clean2.match(/(\d+\.?\d*)/)?.[0];
-      
-      if (num1 && num2 && num1 !== num2) {
-        continue;
-      }
-      
       return true;
     }
   }
   
-  const numMatch1 = clean1.match(/(\d+\.?\d*)/);
-  const numMatch2 = clean2.match(/(\d+\.?\d*)/);
+  // Check for partial matches (e.g., "round" in "round bar")
+  if (clean1.includes(clean2) || clean2.includes(clean1)) {
+    return true;
+  }
   
-  if (numMatch1 && numMatch2 && numMatch1[0] === numMatch2[0]) {
-    const hasMm1 = clean1.includes('mm') || clean1.includes('millimeter');
-    const hasMm2 = clean2.includes('mm') || clean2.includes('millimeter');
-    const hasInch1 = clean1.includes('inch') || clean1.includes('"');
-    const hasInch2 = clean2.includes('inch') || clean2.includes('"');
-    const hasFt1 = clean1.includes('ft') || clean1.includes('feet');
-    const hasFt2 = clean2.includes('ft') || clean2.includes('feet');
-    
-    if ((hasMm1 && hasMm2) || (hasInch1 && hasInch2) || (hasFt1 && hasFt2)) {
-      return true;
+  // For shape-related options, check common terms
+  const shapeTerms = ['round', 'square', 'slotted', 'rectangular', 'hexagonal', 'flat', 'angle', 'channel', 'pipe'];
+  const hasShape1 = shapeTerms.some(term => clean1.includes(term));
+  const hasShape2 = shapeTerms.some(term => clean2.includes(term));
+  
+  if (hasShape1 && hasShape2) {
+    // Check if they contain the same shape term
+    for (const term of shapeTerms) {
+      if (clean1.includes(term) && clean2.includes(term)) {
+        return true;
+      }
     }
+  }
+  
+  // Simple word-based similarity check
+  const words1 = clean1.split(/\s+/);
+  const words2 = clean2.split(/\s+/);
+  
+  // Check if any significant word matches
+  const commonWords = words1.filter(word => 
+    word.length > 2 && words2.includes(word)
+  );
+  
+  if (commonWords.length > 0) {
+    return true;
   }
   
   return false;
