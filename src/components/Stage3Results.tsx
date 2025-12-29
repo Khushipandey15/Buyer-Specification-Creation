@@ -321,52 +321,91 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
 }
 
 function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
-  const normalize = (str: string) => 
-    str.toLowerCase()
-      .replace(/^ss\s*/i, '')
-      .replace(/^ms\s*/i, '')
-      .replace(/^astm\s*/i, '')
-      .replace(/^is\s*/i, '')
-      .replace(/[^a-z0-9.]/g, '')  // CHANGE: '.' ko include karo decimals ke liye
-      .trim();
+  if (!opt1 || !opt2) return false;
   
-  const norm1 = normalize(opt1);
-  const norm2 = normalize(opt2);
+  // Pehle basic cleaning
+  const clean1 = opt1.toLowerCase().trim();
+  const clean2 = opt2.toLowerCase().trim();
   
-  if (norm1 === norm2) return true;
+  // Direct match check
+  if (clean1 === clean2) return true;
   
-  // Check for numeric equivalence (e.g., "10mm" vs "10 mm" vs "10")
-  // IMPROVED VERSION FOR DECIMALS
-  const extractNumberAndUnit = (str: string) => {
-    const numMatch = str.match(/(\d+(\.\d+)?)/); // DECIMALS SUPPORT
-    const unitMatch = str.match(/(mm|cm|millimeter|centimeter)/i);
-    return {
-      number: numMatch ? parseFloat(numMatch[1]) : null, // parseFloat for decimals
-      unit: unitMatch ? unitMatch[0].toLowerCase() : null
-    };
+  // Remove spaces and check
+  const noSpace1 = clean1.replace(/\s+/g, '');
+  const noSpace2 = clean2.replace(/\s+/g, '');
+  if (noSpace1 === noSpace2) return true;
+  
+  // Special cases for common terms
+  const equivalences: Record<string, string[]> = {
+    'round': ['circular', 'circle', 'round shape'],
+    'square': ['squared', 'square shape', 'box'],
+    'slotted': ['slot', 'slotted hole', 'with slot'],
+    'rectangular': ['rectangle', 'rectangular shape'],
+    'hexagonal': ['hexagon', 'hexagonal shape'],
+    'flat': ['flat shape', 'flat bar'],
+    'angle': ['l-shape', 'angle bar'],
+    'channel': ['c-shape', 'channel bar'],
+    'pipe': ['tubular', 'tube'],
+    '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
+    '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
+    'ss304': ['ss 304', 'stainless steel 304'],
+    'ss316': ['ss 316', 'stainless steel 316'],
+    'ms': ['mild steel', 'mildsteel', 'carbon steel'],
+    'gi': ['galvanized iron'],
+    'aluminium': ['aluminum'],
   };
   
-  const data1 = extractNumberAndUnit(opt1);
-  const data2 = extractNumberAndUnit(opt2);
+  // Check if options are in equivalence groups
+  for (const [base, alts] of Object.entries(equivalences)) {
+    const allVariants = [base, ...alts];
+    
+    // Check if clean1 contains any variant
+    const hasOpt1 = allVariants.some(variant => {
+      const regex = new RegExp(`\\b${variant}\\b`, 'i');
+      return regex.test(clean1) || clean1.includes(variant);
+    });
+    
+    // Check if clean2 contains any variant
+    const hasOpt2 = allVariants.some(variant => {
+      const regex = new RegExp(`\\b${variant}\\b`, 'i');
+      return regex.test(clean2) || clean2.includes(variant);
+    });
+    
+    if (hasOpt1 && hasOpt2) {
+      return true;
+    }
+  }
   
-  if (data1.number && data2.number) {
-    // Check if numbers are EXACTLY equal (1.2 != 12)
-    if (data1.number !== data2.number) return false;
-    
-    // Check if they're the same unit type
-    const hasMm1 = norm1.includes('mm') || norm1.includes('millimeter');
-    const hasMm2 = norm2.includes('mm') || norm2.includes('millimeter');
-    const hasCm1 = norm1.includes('cm') || norm1.includes('centimeter');
-    const hasCm2 = norm2.includes('cm') || norm2.includes('centimeter');
-    
-    if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2)) {
-      return true;
+  // Check for partial matches (e.g., "round" in "round bar")
+  if (clean1.includes(clean2) || clean2.includes(clean1)) {
+    return true;
+  }
+  
+  // For shape-related options, check common terms
+  const shapeTerms = ['round', 'square', 'slotted', 'rectangular', 'hexagonal', 'flat', 'angle', 'channel', 'pipe'];
+  const hasShape1 = shapeTerms.some(term => clean1.includes(term));
+  const hasShape2 = shapeTerms.some(term => clean2.includes(term));
+  
+  if (hasShape1 && hasShape2) {
+    // Check if they contain the same shape term
+    for (const term of shapeTerms) {
+      if (clean1.includes(term) && clean2.includes(term)) {
+        return true;
+      }
     }
-    
-    // If both have no units but same number
-    if (!hasMm1 && !hasCm1 && !hasMm2 && !hasCm2 && data1.number === data2.number) {
-      return true;
-    }
+  }
+  
+  // Simple word-based similarity check
+  const words1 = clean1.split(/\s+/);
+  const words2 = clean2.split(/\s+/);
+  
+  // Check if any significant word matches
+  const commonWords = words1.filter(word => 
+    word.length > 2 && words2.includes(word)
+  );
+  
+  if (commonWords.length > 0) {
+    return true;
   }
   
   return false;
