@@ -625,6 +625,7 @@ ffunction getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): 
   
   return finalResult.slice(0, 8);
 }
+
 function selectTopBuyerISQsSemantic(
   commonSpecs: CommonSpecItem[],
   stage2ISQs: ISQ[]
