@@ -206,6 +206,7 @@ function extractCommonAndBuyerSpecs(
   const commonSpecs: CommonSpecItem[] = [];
   const matchedStage1 = new Set<number>();
   const matchedStage2 = new Set<number>();
+  const addedSpecNames = new Set<string>(); // ✅ NEW: Track added specs
   
   stage1AllSpecs.forEach((stage1Spec, i) => {
     stage2ISQs.forEach((stage2ISQ, j) => {
@@ -218,14 +219,20 @@ function extractCommonAndBuyerSpecs(
         // For common specs: bas common options (jitne hain sab)
         const commonOptions = findCommonOptionsOnly(stage1Spec.options, stage2ISQ.options);
         
-        // ✅ CHANGE HERE: REMOVE THE `if (commonOptions.length > 0)` CONDITION
-        // ✅ Always add spec, even if no common options
-        commonSpecs.push({
-          spec_name: stage1Spec.spec_name,
-          options: commonOptions, // Can be empty array
-          input_type: stage1Spec.input_type,
-          category: stage1Spec.tier
-        });
+        // ✅ Check if this spec is already added (normalize and check)
+        const normalizedName = normalizeSpecName(stage1Spec.spec_name);
+        
+        if (!addedSpecNames.has(normalizedName)) {
+          addedSpecNames.add(normalizedName);
+          
+          // ✅ Always add spec, even if no common options
+          commonSpecs.push({
+            spec_name: stage1Spec.spec_name,
+            options: commonOptions, // Can be empty array
+            input_type: stage1Spec.input_type,
+            category: stage1Spec.tier
+          });
+        }
       }
     });
   });
@@ -266,7 +273,6 @@ function extractCommonAndBuyerSpecs(
     buyerISQs: optimizedBuyerISQs  // Optimized 8 options for Buyer ISQs
   };
 }
-
 
 function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   const norm1 = normalizeSpecName(spec1);
