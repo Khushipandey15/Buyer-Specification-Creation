@@ -356,7 +356,7 @@ function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
   
   return false;
 }
-// For Common Specs: Bas common options only (jitne hain sab)
+// For Common Specs: Bas common options only
 function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
   const usedIndices = new Set<number>();
