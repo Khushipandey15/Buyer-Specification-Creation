@@ -185,7 +185,7 @@ function extractCommonAndBuyerSpecs(
       finalized_primary_specs.specs.forEach((spec) => {
         stage1AllSpecs.push({
           spec_name: spec.spec_name,
-          options: spec.options,
+          options: spec.options || [],
           input_type: spec.input_type,
           tier: 'Primary'
         });
@@ -194,7 +194,7 @@ function extractCommonAndBuyerSpecs(
       finalized_secondary_specs.specs.forEach((spec) => {
         stage1AllSpecs.push({
           spec_name: spec.spec_name,
-          options: spec.options,
+          options: spec.options || [],
           input_type: spec.input_type,
           tier: 'Secondary'
         });
@@ -215,23 +215,27 @@ function extractCommonAndBuyerSpecs(
         matchedStage1.add(i);
         matchedStage2.add(j);
         
-        // For common specs: bas common options (jitne hain sab)
-        const commonOptions = findCommonOptionsOnly(stage1Spec.options, stage2ISQ.options);
+        // Find common options
+        const commonOptions = findCommonOptionsOnly(stage1Spec.options, stage2ISQ.options || []);
         
-        if (commonOptions.length > 0) {
-          commonSpecs.push({
-            spec_name: stage1Spec.spec_name,
-            options: commonOptions,
-            input_type: stage1Spec.input_type,
-            category: stage1Spec.tier
-          });
-        }
+        // Add the spec to commonSpecs even if no common options found
+        commonSpecs.push({
+          spec_name: stage1Spec.spec_name,
+          options: commonOptions,
+          input_type: stage1Spec.input_type,
+          category: stage1Spec.tier
+        });
       }
     });
   });
   
+  // Remove duplicate specs (same spec name wale)
+  const uniqueCommonSpecs = commonSpecs.filter((spec, index, self) =>
+    index === self.findIndex(s => s.spec_name === spec.spec_name)
+  );
+  
   // Select buyer ISQs from common specs
-  const buyerISQs = selectTopBuyerISQsSemantic(commonSpecs, stage2ISQs);
+  const buyerISQs = selectTopBuyerISQsSemantic(uniqueCommonSpecs, stage2ISQs);
   
   // Now update buyer ISQs with optimized 8 options
   const optimizedBuyerISQs = buyerISQs.map(buyerISQ => {
@@ -246,10 +250,10 @@ function extractCommonAndBuyerSpecs(
     );
     
     if (correspondingStage2ISQ && originalStage1Spec) {
-      // Get 8 optimized options for Buyer ISQs (common + stage1 unique)
+      // Get optimized options for Buyer ISQs
       const buyerOptions = getBuyerISQOptions(
         originalStage1Spec.options,
-        correspondingStage2ISQ.options
+        correspondingStage2ISQ.options || []
       );
       
       return {
@@ -262,8 +266,8 @@ function extractCommonAndBuyerSpecs(
   });
   
   return {
-    commonSpecs,  // Original common options only (jitne hain sab)
-    buyerISQs: optimizedBuyerISQs  // Optimized 8 options for Buyer ISQs
+    commonSpecs: uniqueCommonSpecs,
+    buyerISQs: optimizedBuyerISQs
   };
 }
 
