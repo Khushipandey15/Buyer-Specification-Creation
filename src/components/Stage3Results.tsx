@@ -282,6 +282,66 @@ function extractCommonAndBuyerSpecs(
   };
 }
 
+function normalizeSpecName(name: string): string {
+  let normalized = name.toLowerCase().trim();
+  normalized = normalized.replace(/[()\-_,.;]/g, ' ');
+
+  const standardizations: Record<string, string> = {
+    'material': 'material',
+    'grade': 'grade',
+    'thk': 'thickness',
+    'thickness': 'thickness',
+    'type': 'type',
+    'shape': 'shape',
+    'size': 'size',
+    'dimension': 'size',
+    'length': 'length',
+    'width': 'width',
+    'height': 'height',
+    'dia': 'diameter',
+    'diameter': 'diameter',
+    'color': 'color',
+    'colour': 'color',
+    'finish': 'finish',
+    'surface': 'finish',
+    'weight': 'weight',
+    'wt': 'weight',
+    'capacity': 'capacity',
+    'brand': 'brand',
+    'model': 'model',
+    'quality': 'quality',
+    'standard': 'standard',
+    'specification': 'spec',
+    'perforation': 'hole',
+    'hole': 'hole',
+    'pattern': 'pattern',
+    'design': 'design',
+    'application': 'application',
+    'usage': 'application'
+  };
+
+  const words = normalized.split(/\s+/).filter(w => w.length > 0);
+  const standardizedWords = words.map(word => {
+    if (standardizations[word]) {
+      return standardizations[word];
+    }
+
+    for (const [key, value] of Object.entries(standardizations)) {
+      if (word.includes(key) || key.includes(word)) {
+        return value;
+      }
+    }
+
+    return word;
+  });
+
+  const uniqueWords = [...new Set(standardizedWords)];
+  const fillerWords = ['sheet', 'plate', 'pipe', 'rod', 'bar', 'in', 'for', 'of', 'the'];
+  const filteredWords = uniqueWords.filter(word => !fillerWords.includes(word));
+
+  return filteredWords.join(' ').trim();
+}
+
 function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   const norm1 = normalizeSpecName(spec1);
   const norm2 = normalizeSpecName(spec2);
