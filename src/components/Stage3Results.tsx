@@ -15,6 +15,7 @@ interface CommonSpecItem {
   options: string[];
   input_type: string;
   category: "Primary" | "Secondary";
+  priority: number;
 }
 
 interface BuyerISQItem {
@@ -148,6 +149,11 @@ function SpecCard({
             <span className={`inline-block ${colors.badge} px-2 py-1 rounded`}>
               {spec.category}
             </span>
+            {'priority' in spec && spec.priority > 0 && (
+              <span className="inline-block ml-2 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs">
+                Priority: {spec.priority}
+              </span>
+            )}
             {spec.options.length === 0 && (
               <span className="inline-block ml-2 text-gray-500 text-xs">
                 (No common options)
@@ -178,98 +184,129 @@ function extractCommonAndBuyerSpecs(
   stage1: Stage1Output,
   isqs: { config: ISQ; keys: ISQ[]; buyers: ISQ[] }
 ): { commonSpecs: CommonSpecItem[]; buyerISQs: BuyerISQItem[] } {
-  // Collect all stage2 ISQs
-  const stage2ISQs = [isqs.config, ...isqs.keys, ...isqs.buyers];
+  // Collect all stage2 ISQs with priorities
+  const stage2ISQs: (ISQ & { priority: number })[] = [
+    { ...isqs.config, priority: 3 }, // Config ISQ highest priority
+    ...isqs.keys.map(k => ({ ...k, priority: 2 })), // Keys medium priority
+    ...isqs.buyers.map(b => ({ ...b, priority: 1 })) // Buyers lowest priority
+  ];
   
   const stage1AllSpecs: Array<{
     spec_name: string;
     options: string[];
     input_type: string;
-    tier: 'Primary' | 'Secondary' | 'Tertiary';
+    tier: 'Primary' | 'Secondary';
+    priority: number;
   }> = [];
   
-  // Extract all specs from stage1
+  // Extract all specs from stage1 with priorities
   stage1.seller_specs.forEach((ss) => {
     ss.mcats.forEach((mcat) => {
       const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
       
+      // Primary specs: priority 3
       finalized_primary_specs.specs.forEach((spec) => {
         stage1AllSpecs.push({
           spec_name: spec.spec_name,
           options: spec.options || [],
           input_type: spec.input_type,
-          tier: 'Primary'
+          tier: 'Primary',
+          priority: 3
         });
       });
       
+      // Secondary specs: priority 2
       finalized_secondary_specs.specs.forEach((spec) => {
         stage1AllSpecs.push({
           spec_name: spec.spec_name,
           options: spec.options || [],
           input_type: spec.input_type,
-          tier: 'Secondary'
+          tier: 'Secondary',
+          priority: 2
         });
       });
     });
   });
   
-  // Find semantically common specs
+  // Find semantically common specs with improved matching
   const commonSpecs: CommonSpecItem[] = [];
   const matchedStage1 = new Set<number>();
   const matchedStage2 = new Set<number>();
   
   stage1AllSpecs.forEach((stage1Spec, i) => {
+    // Find best matching Stage2 ISQ
+    let bestMatchIndex = -1;
+    let bestMatchPriority = 0;
+    let bestMatchOptions: string[] = [];
+    
     stage2ISQs.forEach((stage2ISQ, j) => {
       if (matchedStage2.has(j)) return;
       
       if (isSemanticallySimilar(stage1Spec.spec_name, stage2ISQ.name)) {
-        matchedStage1.add(i);
-        matchedStage2.add(j);
+        const combinedPriority = stage1Spec.priority + stage2ISQ.priority;
         
-        // Find common options
-        const commonOptions = findCommonOptionsOnly(stage1Spec.options, stage2ISQ.options || []);
-        
-        // Add the spec to commonSpecs even if no common options found
-        commonSpecs.push({
-          spec_name: stage1Spec.spec_name,
-          options: commonOptions,
-          input_type: stage1Spec.input_type,
-          category: stage1Spec.tier
-        });
+        if (bestMatchIndex === -1 || combinedPriority > bestMatchPriority) {
+          bestMatchIndex = j;
+          bestMatchPriority = combinedPriority;
+          bestMatchOptions = stage2ISQ.options || [];
+        }
       }
     });
+    
+    if (bestMatchIndex !== -1) {
+      matchedStage1.add(i);
+      matchedStage2.add(bestMatchIndex);
+      
+      // Find common options with strong matching
+      const commonOptions = findCommonOptionsWithStrongMatching(
+        stage1Spec.options, 
+        bestMatchOptions
+      );
+      
+      // Calculate display priority
+      const displayPriority = stage1Spec.priority + stage2ISQs[bestMatchIndex].priority;
+      
+      commonSpecs.push({
+        spec_name: stage1Spec.spec_name,
+        options: commonOptions,
+        input_type: stage1Spec.input_type,
+        category: stage1Spec.tier,
+        priority: displayPriority
+      });
+    }
   });
   
-  // Remove duplicate specs (same spec name wale)
+  // Remove duplicate specs (same spec name)
   const uniqueCommonSpecs = commonSpecs.filter((spec, index, self) =>
     index === self.findIndex(s => s.spec_name === spec.spec_name)
   );
   
-  // Select buyer ISQs from common specs
-  const buyerISQs = selectTopBuyerISQsSemantic(uniqueCommonSpecs, stage2ISQs);
+  // Sort by priority (highest first)
+  uniqueCommonSpecs.sort((a, b) => b.priority - a.priority);
   
-  // Now update buyer ISQs with optimized 8 options
+  // Select buyer ISQs from top priority specs
+  const buyerISQs = selectTopBuyerISQsByPriority(uniqueCommonSpecs);
+  
+  // Optimize buyer ISQ options
   const optimizedBuyerISQs = buyerISQs.map(buyerISQ => {
-    // Find the corresponding Stage 2 ISQ for this buyer ISQ
+    const originalStage1Spec = stage1AllSpecs.find(spec => 
+      spec.spec_name === buyerISQ.spec_name
+    );
+    
     const correspondingStage2ISQ = stage2ISQs.find(isq => 
       isSemanticallySimilar(buyerISQ.spec_name, isq.name)
     );
     
-    // Find the original Stage 1 spec for this buyer ISQ
-    const originalStage1Spec = stage1AllSpecs.find(spec => 
-      isSemanticallySimilar(spec.spec_name, buyerISQ.spec_name)
-    );
-    
-    if (correspondingStage2ISQ && originalStage1Spec) {
-      // Get optimized options for Buyer ISQs
-      const buyerOptions = getBuyerISQOptions(
+    if (originalStage1Spec && correspondingStage2ISQ) {
+      const optimizedOptions = getOptimizedBuyerOptions(
         originalStage1Spec.options,
-        correspondingStage2ISQ.options || []
+        correspondingStage2ISQ.options || [],
+        normalizeSpecName(buyerISQ.spec_name)
       );
       
       return {
         ...buyerISQ,
-        options: buyerOptions
+        options: optimizedOptions
       };
     }
     
@@ -380,186 +417,123 @@ function isSemanticallySimilar(spec1: string, spec2: string): boolean {
   return false;
 }
 
-function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
+function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
   if (!opt1 || !opt2) return false;
   
-  const clean1 = opt1.trim().toLowerCase();
-  const clean2 = opt2.trim().toLowerCase();
+  const clean1 = opt1.toLowerCase().trim();
+  const clean2 = opt2.toLowerCase().trim();
   
   // Direct match
   if (clean1 === clean2) return true;
   
-  // Remove extra spaces and compare
+  // Remove spaces and compare
   const noSpace1 = clean1.replace(/\s+/g, '');
   const noSpace2 = clean2.replace(/\s+/g, '');
   if (noSpace1 === noSpace2) return true;
   
-  // Special cases for common materials
-  const materialEquivalences = [
-    ['ss304', 'ss 304', '304', 'stainless steel 304', 'stainless304'],
-    ['ss316', 'ss 316', '316', 'stainless steel 316', 'stainless316'],
-    ['ms', 'mild steel', 'mildsteel', 'carbon steel'],
+  // Material and grade equivalences
+  const materialGroups = [
+    ['304', 'ss304', 'ss 304', 'stainless steel 304'],
+    ['316', 'ss316', 'ss 316', 'stainless steel 316'],
+    ['430', 'ss430', 'ss 430'],
+    ['201', 'ss201', 'ss 201'],
+    ['202', 'ss202', 'ss 202'],
+    ['310', 'ss310', 'ss 310'],
+    ['304l', '304 l'],
+    ['316l', '316 l'],
+    ['ms', 'mild steel', 'carbon steel'],
     ['gi', 'galvanized iron'],
     ['aluminium', 'aluminum'],
   ];
   
-  for (const group of materialEquivalences) {
-    const hasOpt1 = group.some(variant => clean1.includes(variant));
-    const hasOpt2 = group.some(variant => clean2.includes(variant));
-    
-    if (hasOpt1 && hasOpt2) {
-      // Check if same grade/number
-      const num1 = clean1.match(/(\d+)/)?.[0];
-      const num2 = clean2.match(/(\d+)/)?.[0];
-      
-      if (num1 && num2 && num1 !== num2) {
-        return false; // Different grades
-      }
+  for (const group of materialGroups) {
+    const inGroup1 = group.some(term => clean1.includes(term));
+    const inGroup2 = group.some(term => clean2.includes(term));
+    if (inGroup1 && inGroup2) {
+      // Check if same numeric grade
+      const num1 = clean1.match(/\b(\d+)\b/)?.[1];
+      const num2 = clean2.match(/\b(\d+)\b/)?.[1];
+      if (num1 && num2 && num1 !== num2) return false;
       return true;
     }
   }
   
-  // For measurements with units
-  const extractMeasurement = (str: string) => {
-    const numMatch = str.match(/(\d+(\.\d+)?)/);
-    if (!numMatch) return null;
+  // Measurement matching
+  const getMeasurement = (str: string) => {
+    const match = str.match(/(\d+(\.\d+)?)\s*(mm|cm|m|inch|in|ft|"|')?/i);
+    if (!match) return null;
     
-    const number = parseFloat(numMatch[1]);
-    const unit = str.replace(numMatch[0], '').trim();
+    const value = parseFloat(match[1]);
+    const unit = match[3]?.toLowerCase() || '';
     
-    return { number, unit };
+    // Convert to mm for comparison
+    if (unit === 'cm' || unit === 'centimeter') return value * 10;
+    if (unit === 'm' || unit === 'meter') return value * 1000;
+    if (unit === 'inch' || unit === 'in' || unit === '"') return value * 25.4;
+    if (unit === 'ft' || unit === 'feet' || unit === "'") return value * 304.8;
+    return value; // assume mm
   };
   
-  const meas1 = extractMeasurement(clean1);
-  const meas2 = extractMeasurement(clean2);
+  const meas1 = getMeasurement(clean1);
+  const meas2 = getMeasurement(clean2);
   
-  if (meas1 && meas2 && meas1.number === meas2.number) {
-    // Same number, check units
-    const mmUnits = ['mm', 'millimeter', 'millimetre'];
-    const cmUnits = ['cm', 'centimeter', 'centimetre'];
-    const inchUnits = ['inch', 'in', '"', 'inches'];
-    const ftUnits = ['ft', 'feet', 'foot'];
-    
-    const isMm1 = mmUnits.some(u => meas1.unit.includes(u));
-    const isMm2 = mmUnits.some(u => meas2.unit.includes(u));
-    const isCm1 = cmUnits.some(u => meas1.unit.includes(u));
-    const isCm2 = cmUnits.some(u => meas2.unit.includes(u));
-    const isInch1 = inchUnits.some(u => meas1.unit.includes(u));
-    const isInch2 = inchUnits.some(u => meas2.unit.includes(u));
-    const isFt1 = ftUnits.some(u => meas1.unit.includes(u));
-    const isFt2 = ftUnits.some(u => meas2.unit.includes(u));
-    
-    if ((isMm1 && isMm2) || (isCm1 && isCm2) || 
-        (isInch1 && isInch2) || (isFt1 && isFt2) ||
-        (!isMm1 && !isCm1 && !isInch1 && !isFt1 && 
-         !isMm2 && !isCm2 && !isInch2 && !isFt2)) {
-      return true;
-    }
+  if (meas1 && meas2 && Math.abs(meas1 - meas2) < 0.01) {
+    return true;
   }
   
-  // For finishes like Mirror, Hairline, etc.
-  const finishEquivalences = [
-    ['mirror', 'mirror finish', 'polished mirror'],
-    ['hairline', 'hairline finish', 'brushed', 'brushed finish'],
-    ['mill', 'mill finish', 'mill finished'],
-    ['galvanized', 'gi', 'galvanized finish'],
-    ['powder', 'powder coated', 'powder coating'],
+  // Mesh count matching (for wire mesh, etc.)
+  const meshMatch1 = clean1.match(/(\d+)\s*mesh/i);
+  const meshMatch2 = clean2.match(/(\d+)\s*mesh/i);
+  if (meshMatch1 && meshMatch2 && meshMatch1[1] === meshMatch2[1]) {
+    return true;
+  }
+  
+  // Shape equivalences
+  const shapeGroups = [
+    ['round', 'circular', 'circle'],
+    ['square', 'squared'],
+    ['rectangular', 'rectangle'],
+    ['hexagonal', 'hexagon'],
+    ['flat', 'flat bar'],
+    ['angle', 'l shape', 'l-shaped'],
+    ['channel', 'c shape', 'c-shaped'],
+    ['pipe', 'tube', 'tubular'],
+    ['slotted', 'slot'],
+    ['plain weave', 'plain'],
+    ['twilled weave', 'twilled'],
+    ['dutch weave', 'dutch'],
+    ['crimped weave', 'crimped'],
   ];
   
-  for (const group of finishEquivalences) {
-    const hasOpt1 = group.some(variant => clean1.includes(variant));
-    const hasOpt2 = group.some(variant => clean2.includes(variant));
-    
-    if (hasOpt1 && hasOpt2) return true;
+  for (const group of shapeGroups) {
+    const inGroup1 = group.some(term => clean1.includes(term));
+    const inGroup2 = group.some(term => clean2.includes(term));
+    if (inGroup1 && inGroup2) return true;
+  }
+  
+  // Finish equivalences
+  const finishGroups = [
+    ['mill finish', 'mill'],
+    ['polished', 'mirror', 'bright'],
+    ['galvanized', 'gi'],
+    ['brushed', 'hairline'],
+    ['anodized', 'anodize'],
+    ['painted', 'coated'],
+  ];
+  
+  for (const group of finishGroups) {
+    const inGroup1 = group.some(term => clean1.includes(term));
+    const inGroup2 = group.some(term => clean2.includes(term));
+    if (inGroup1 && inGroup2) return true;
   }
   
   return false;
 }
 
-function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
-  if (!opt1 || !opt2) return false;
-  
-  const clean1 = opt1.toLowerCase().trim().replace(/\s+/g, '');
-  const clean2 = opt2.toLowerCase().trim().replace(/\s+/g, '');
-  
-  // Direct match
-  if (clean1 === clean2) return true;
-  
-  // Common equivalences
-  const equivalences: Record<string, string[]> = {
-    'round': ['circular', 'circle'],
-    'square': ['squared'],
-    'slotted': ['slot'],
-    'rectangular': ['rectangle'],
-    'hexagonal': ['hexagon'],
-    'flat': ['flatbar'],
-    'angle': ['lshape', 'l-shaped'],
-    'channel': ['cshape', 'c-shaped'],
-    'pipe': ['tube', 'tubular'],
-    '304': ['304l', '304h', 'ss304', 'ss304'],
-    '316': ['316l', '316ti', 'ss316', 'ss316'],
-    'ss304': ['stainlesssteel304', 'stainless304'],
-    'ss316': ['stainlesssteel316', 'stainless316'],
-    'ms': ['mildsteel', 'carbonsteel'],
-    'gi': ['galvanizediron'],
-    'aluminium': ['aluminum'],
-    'small': ['sm', 's'],
-    'medium': ['med', 'm'],
-    'large': ['lg', 'l'],
-    'extralarge': ['xl', 'x-large'],
-  };
-  
-  // Check equivalence groups
-  for (const [base, alts] of Object.entries(equivalences)) {
-    const allVariants = [base, ...alts];
-    const hasOpt1 = allVariants.some(variant => clean1.includes(variant));
-    const hasOpt2 = allVariants.some(variant => clean2.includes(variant));
-    
-    if (hasOpt1 && hasOpt2) {
-      return true;
-    }
-  }
-  
-  // Number-based matching (for sizes, thickness, etc.)
-  const numMatch1 = clean1.match(/(\d+(\.\d+)?)/);
-  const numMatch2 = clean2.match(/(\d+(\.\d+)?)/);
-  
-  if (numMatch1 && numMatch2 && numMatch1[1] === numMatch2[1]) {
-    // Same number found
-    const unit1 = clean1.replace(numMatch1[1], '');
-    const unit2 = clean2.replace(numMatch2[1], '');
-    
-    // Check if units are compatible
-    const mmUnits = ['mm', 'millimeter', 'millimetre'];
-    const cmUnits = ['cm', 'centimeter', 'centimetre'];
-    const inchUnits = ['inch', 'in', '"', 'inches'];
-    const ftUnits = ['ft', 'feet', 'foot'];
-    
-    const hasMm1 = mmUnits.some(u => unit1.includes(u));
-    const hasMm2 = mmUnits.some(u => unit2.includes(u));
-    const hasCm1 = cmUnits.some(u => unit1.includes(u));
-    const hasCm2 = cmUnits.some(u => unit2.includes(u));
-    const hasInch1 = inchUnits.some(u => unit1.includes(u));
-    const hasInch2 = inchUnits.some(u => unit2.includes(u));
-    const hasFt1 = ftUnits.some(u => unit1.includes(u));
-    const hasFt2 = ftUnits.some(u => unit2.includes(u));
-    
-    if ((hasMm1 && hasMm2) || (hasCm1 && hasCm2) || 
-        (hasInch1 && hasInch2) || (hasFt1 && hasFt2) ||
-        (!hasMm1 && !hasCm1 && !hasInch1 && !hasFt1 && 
-         !hasMm2 && !hasCm2 && !hasInch2 && !hasFt2)) {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
-// For Common Specs: Bas common options only (jitne hain sab)
-function findCommonOptionsOnly(options1: string[], options2: string[]): string[] {
+function findCommonOptionsWithStrongMatching(options1: string[], options2: string[]): string[] {
   const common: string[] = [];
   const usedIndices = new Set<number>();
-  const addedOptions = new Set<string>(); // Duplicates track karne ke liye
+  const addedOptions = new Set<string>();
   
   // First pass: exact matches
   options1.forEach((opt1) => {
@@ -572,22 +546,22 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
     });
     
     if (exactMatchIndex !== -1 && !addedOptions.has(cleanOpt1)) {
-      common.push(opt1); // Original casing preserve karo
+      common.push(opt1);
       usedIndices.add(exactMatchIndex);
       addedOptions.add(cleanOpt1);
     }
   });
   
-  // Second pass: semantic matches (baki options ke liye)
+  // Second pass: strong semantic matches
   options1.forEach((opt1) => {
     const cleanOpt1 = opt1.trim().toLowerCase();
-    if (addedOptions.has(cleanOpt1)) return; // Already added
+    if (addedOptions.has(cleanOpt1)) return;
     
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
       if (addedOptions.has(cleanOpt1)) return;
       
-      if (isSemanticallySimilarOption(opt1, opt2)) {
+      if (areOptionsStronglySimilar(opt1, opt2)) {
         common.push(opt1);
         usedIndices.add(j);
         addedOptions.add(cleanOpt1);
@@ -595,127 +569,114 @@ function findCommonOptionsOnly(options1: string[], options2: string[]): string[]
     });
   });
   
-  return common;
+  // Remove any remaining duplicates
+  const finalCommon: string[] = [];
+  const finalSeen = new Set<string>();
+  
+  for (const opt of common) {
+    const cleanOpt = opt.trim().toLowerCase();
+    if (!finalSeen.has(cleanOpt)) {
+      finalCommon.push(opt);
+      finalSeen.add(cleanOpt);
+    }
+  }
+  
+  return finalCommon;
 }
-// For Buyer ISQs: Common options first, then Stage 1 unique options (total 8)
-function getBuyerISQOptions(stage1Options: string[], stage2Options: string[]): string[] {
+
+function getOptimizedBuyerOptions(
+  stage1Options: string[], 
+  stage2Options: string[],
+  normName: string
+): string[] {
   const result: string[] = [];
-  const used = new Set<string>();
+  const seen = new Set<string>();
   
-  // Phase 1: Find and add common options first (EXACT matches)
-  const matchedStage2Indices = new Set<number>();
-  
-  // First pass: Exact matches
-  stage1Options.forEach((opt1) => {
-    if (result.length >= 8) return;
+  // Step 1: Add EXACT matches first
+  for (const opt1 of stage1Options) {
+    if (result.length >= 8) break;
     
     const cleanOpt1 = opt1.trim().toLowerCase();
-    const exactMatchIndex = stage2Options.findIndex((opt2, j) => {
-      if (matchedStage2Indices.has(j)) return false;
-      const cleanOpt2 = opt2.trim().toLowerCase();
-      return cleanOpt1 === cleanOpt2;
+    const exactMatch = stage2Options.find(opt2 => 
+      opt2.trim().toLowerCase() === cleanOpt1
+    );
+    
+    if (exactMatch && !seen.has(cleanOpt1)) {
+      result.push(opt1);
+      seen.add(cleanOpt1);
+    }
+  }
+  
+  // Step 2: Add STRONG semantic matches
+  if (result.length < 8) {
+    for (const opt1 of stage1Options) {
+      if (result.length >= 8) break;
+      
+      const cleanOpt1 = opt1.trim().toLowerCase();
+      if (seen.has(cleanOpt1)) continue;
+      
+      for (const opt2 of stage2Options) {
+        if (result.length >= 8) break;
+        
+        if (areOptionsStronglySimilar(opt1, opt2) && !seen.has(cleanOpt1)) {
+          result.push(opt1);
+          seen.add(cleanOpt1);
+          break;
+        }
+      }
+    }
+  }
+  
+  // Step 3: Add remaining Stage 1 options (most relevant)
+  if (result.length < 8) {
+    const remainingStage1 = stage1Options.filter(opt => {
+      const cleanOpt = opt.trim().toLowerCase();
+      return !seen.has(cleanOpt);
     });
     
-    if (exactMatchIndex !== -1 && !used.has(cleanOpt1)) {
-      result.push(opt1);
-      used.add(cleanOpt1);
-      matchedStage2Indices.add(exactMatchIndex);
+    // Take top options (max 8 total)
+    const toAdd = Math.min(8 - result.length, remainingStage1.length);
+    for (let i = 0; i < toAdd; i++) {
+      result.push(remainingStage1[i]);
+      seen.add(remainingStage1[i].trim().toLowerCase());
     }
-  });
-  
-  // Second pass: Semantic matches for remaining options
-  if (result.length < 8) {
-    stage1Options.forEach(opt1 => {
-      if (result.length >= 8) return;
-      
-      const cleanOpt1 = opt1.trim().toLowerCase();
-      if (used.has(cleanOpt1)) return;
-      
-      stage2Options.forEach((opt2, j) => {
-        if (result.length >= 8) return;
-        if (matchedStage2Indices.has(j)) return;
-        if (used.has(cleanOpt1)) return;
-        
-        if (isSemanticallySimilarOption(opt1, opt2) && !used.has(cleanOpt1)) {
-          result.push(opt1);
-          used.add(cleanOpt1);
-          matchedStage2Indices.add(j);
-        }
-      });
-    });
   }
   
-  // Phase 2: Add remaining Stage 1 options (no duplicates)
+  // Step 4: Add remaining Stage 2 options if still needed
   if (result.length < 8) {
-    stage1Options.forEach(opt1 => {
-      if (result.length >= 8) return;
-      
-      const cleanOpt1 = opt1.trim().toLowerCase();
-      if (!used.has(cleanOpt1)) {
-        result.push(opt1);
-        used.add(cleanOpt1);
-      }
+    const remainingStage2 = stage2Options.filter(opt => {
+      const cleanOpt = opt.trim().toLowerCase();
+      return !seen.has(cleanOpt);
     });
+    
+    const toAdd = Math.min(8 - result.length, remainingStage2.length);
+    for (let i = 0; i < toAdd; i++) {
+      result.push(remainingStage2[i]);
+      seen.add(remainingStage2[i].trim().toLowerCase());
+    }
   }
   
-  // Phase 3: Add remaining Stage 2 options (no duplicates)
-  if (result.length < 8) {
-    stage2Options.forEach((opt2, j) => {
-      if (result.length >= 8) return;
-      
-      const cleanOpt2 = opt2.trim().toLowerCase();
-      if (!matchedStage2Indices.has(j) && !used.has(cleanOpt2)) {
-        result.push(opt2);
-        used.add(cleanOpt2);
-      }
-    });
-  }
-  
-  // Final deduplication check
+  // Step 5: Ensure no duplicates in final result
   const finalResult: string[] = [];
-  const finalUsed = new Set<string>();
+  const finalSeen = new Set<string>();
   
-  result.forEach(opt => {
+  for (const opt of result) {
     const cleanOpt = opt.trim().toLowerCase();
-    if (!finalUsed.has(cleanOpt)) {
+    if (!finalSeen.has(cleanOpt)) {
       finalResult.push(opt);
-      finalUsed.add(cleanOpt);
+      finalSeen.add(cleanOpt);
     }
-  });
+  }
   
   return finalResult.slice(0, 8);
 }
 
-function selectTopBuyerISQsSemantic(
-  commonSpecs: CommonSpecItem[],
-  stage2ISQs: ISQ[]
+function selectTopBuyerISQsByPriority(
+  commonSpecs: CommonSpecItem[]
 ): BuyerISQItem[] {
-  // Score each common spec based on importance
-  const scoredSpecs = commonSpecs.map(spec => {
-    let score = 0;
-    
-    // Tier priority
-    if (spec.category === 'Primary') score += 3;
-    if (spec.category === 'Secondary') score += 1;
-    
-    // Option count
-    score += Math.min(spec.options.length, 5);
-    
-    // Check if it's in stage2 config or keys (higher importance)
-    const isInStage2Important = stage2ISQs.some(isq => 
-      isSemanticallySimilar(spec.spec_name, isq.name)
-    );
-    if (isInStage2Important) score += 2;
-    
-    return { ...spec, score };
-  });
-  
-  // Sort by score descending
-  scoredSpecs.sort((a, b) => b.score - a.score);
-  
-  // Take top 2 and remove duplicates from options
-  return scoredSpecs.slice(0, 2).map(spec => {
-    // Remove duplicate options from buyer ISQ
+  // Take top 2 specs by priority
+  return commonSpecs.slice(0, 2).map(spec => {
+    // Remove duplicate options
     const uniqueOptions: string[] = [];
     const seenOptions = new Set<string>();
     
