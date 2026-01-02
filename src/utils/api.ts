@@ -701,7 +701,7 @@ RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just ra
 }
 
 // ============================================
-// STAGE 3 BUYER ISQs SELECTION - SIMPLIFIED VERSION
+// STAGE 3 BUYER ISQs SELECTION - IMPROVED VERSION
 // ============================================
 
 export function selectStage3BuyerISQs(
@@ -710,63 +710,102 @@ export function selectStage3BuyerISQs(
 ): ISQ[] {
   console.log('🔍 selectStage3BuyerISQs called');
 
-  // Flatten Stage1 specs
-  const stage1All: (ISQ & { tier: string; normName: string; spec_name?: string })[] = [];
+  // 1️⃣ Flatten Stage1 specs with priority
+  const stage1All: (ISQ & { 
+    tier: string; 
+    normName: string; 
+    spec_name?: string;
+    priority: number;
+  })[] = [];
+  
   stage1.seller_specs.forEach(ss => {
     ss.mcats.forEach(mcat => {
       const { finalized_primary_specs, finalized_secondary_specs } = mcat.finalized_specs;
 
+      // Primary specs (priority 3)
       finalized_primary_specs.specs.forEach(s => {
         stage1All.push({ 
           name: s.spec_name,
           spec_name: s.spec_name,
           options: s.options || [],
           tier: "Primary", 
-          normName: normalizeSpecName(s.spec_name)
+          normName: normalizeSpecName(s.spec_name),
+          priority: 3
         });
       });
       
+      // Secondary specs (priority 2)
       finalized_secondary_specs.specs.forEach(s => {
         stage1All.push({ 
           name: s.spec_name,
           spec_name: s.spec_name,
           options: s.options || [],
           tier: "Secondary", 
-          normName: normalizeSpecName(s.spec_name)
+          normName: normalizeSpecName(s.spec_name),
+          priority: 2
         });
       });
     });
   });
 
-  // Flatten Stage2 specs
-  const stage2All: (ISQ & { normName: string })[] = [
-    { ...stage2.config, options: stage2.config.options || [] },
-    ...stage2.keys.map(k => ({ ...k, options: k.options || [] })),
-    ...(stage2.buyers || []).map(b => ({ ...b, options: b.options || [] }))
+  // 2️⃣ Flatten Stage2 specs
+  const stage2All: (ISQ & { normName: string; priority: number })[] = [
+    { ...stage2.config, options: stage2.config.options || [], priority: 3 }, // Config ISQ highest priority
+    ...stage2.keys.map(k => ({ ...k, options: k.options || [], priority: 2 })), // Keys medium priority
+    ...(stage2.buyers || []).map(b => ({ ...b, options: b.options || [], priority: 1 })) // Buyers lowest priority
   ]
   .map(s => ({ 
     ...s, 
-    normName: normalizeSpecName(s.name),
-    options: s.options
+    normName: normalizeSpecName(s.name)
   }));
 
   console.log('📊 Stage1 specs:', stage1All.length);
   console.log('📊 Stage2 specs:', stage2All.length);
 
-  // Find common specs - SPEC NAME common hone par filter karo, options ki condition nahi
-  const commonSpecs = stage1All.filter(s1 => 
-    stage2All.some(s2 => s2.normName === s1.normName)
-  );
+  // 3️⃣ Find common specs - IMPROVED LOGIC
+  const commonSpecs: (ISQ & { 
+    tier: string; 
+    normName: string; 
+    spec_name?: string;
+    priority: number;
+    combinedPriority: number;
+    stage1Options: string[];
+    stage2Options: string[];
+  })[] = [];
+
+  stage1All.forEach(s1 => {
+    const matchingStage2 = stage2All.filter(s2 => s2.normName === s1.normName);
+    
+    if (matchingStage2.length > 0) {
+      // Find the best matching Stage2 spec (highest priority)
+      const bestMatch = matchingStage2.reduce((best, current) => 
+        current.priority > best.priority ? current : best
+      );
+      
+      // Calculate combined priority
+      const combinedPriority = s1.priority + bestMatch.priority;
+      
+      commonSpecs.push({
+        ...s1,
+        combinedPriority,
+        stage1Options: s1.options,
+        stage2Options: bestMatch.options
+      });
+    }
+  });
 
   console.log('🎯 Common specs found:', commonSpecs.length);
-  commonSpecs.forEach(s => console.log(`   - ${s.spec_name} (${s.options.length} options)`));
+  commonSpecs.forEach(s => console.log(`   - ${s.spec_name} (Priority: ${s.combinedPriority})`));
 
   if (commonSpecs.length === 0) {
     console.log('⚠️ No common specs found');
     return [];
   }
 
-  // Select top 2 buyer ISQs
+  // 4️⃣ Sort by combined priority (highest first)
+  commonSpecs.sort((a, b) => b.combinedPriority - a.combinedPriority);
+
+  // 5️⃣ Select top 2 buyer ISQs
   const buyerISQs: ISQ[] = [];
   const maxBuyers = Math.min(2, commonSpecs.length);
   
@@ -774,9 +813,13 @@ export function selectStage3BuyerISQs(
     const spec = commonSpecs[i];
     console.log(`\n📦 Processing spec ${i+1}: ${spec.spec_name}`);
     
-    const options = getBuyerISQOptions(spec.normName, stage1All, stage2All);
+    // Get optimized options
+    const options = getOptimizedBuyerISQOptions(
+      spec.stage1Options, 
+      spec.stage2Options,
+      spec.normName
+    );
     
-    // Always add the spec even if options are less than 2
     buyerISQs.push({ 
       name: spec.spec_name, 
       options: options
@@ -788,182 +831,193 @@ export function selectStage3BuyerISQs(
   return buyerISQs;
 }
 
-// SIMPLE FUNCTION TO GET 8 OPTIONS FOR BUYER ISQ
-function getBuyerISQOptions(
-  normName: string, 
-  stage1All: (ISQ & { tier: string; normName: string; spec_name?: string })[],
-  stage2All: (ISQ & { normName: string })[]
+// IMPROVED FUNCTION TO GET OPTIMIZED OPTIONS
+function getOptimizedBuyerISQOptions(
+  stage1Options: string[], 
+  stage2Options: string[],
+  normName: string
 ): string[] {
-  console.log(`🔧 Getting options for: "${normName}"`);
-  
-  const s2 = stage2All.find(s => s.normName === normName);
-  const s1 = stage1All.find(s => s.normName === normName);
-
-  const stage1Options = s1?.options || [];
-  const stage2Options = s2?.options || [];
-  
-  console.log(`   Stage 1 options: ${stage1Options.length}`);
-  console.log(`   Stage 2 options: ${stage2Options.length}`);
+  console.log(`🔧 Getting optimized options for: "${normName}"`);
+  console.log(`   Stage 1 options:`, stage1Options);
+  console.log(`   Stage 2 options:`, stage2Options);
 
   const result: string[] = [];
   const seen = new Set<string>();
 
-  // STEP 1: Add COMMON options (exist in BOTH Stage 1 and Stage 2)
-  console.log('   Step 1: Adding common options...');
-  
-  for (const s1Opt of stage1Options) {
+  // Step 1: Add EXACT matches first
+  console.log('   Step 1: Adding exact matches...');
+  for (const opt1 of stage1Options) {
     if (result.length >= 8) break;
     
-    const cleanS1 = s1Opt.trim().toLowerCase();
+    const cleanOpt1 = opt1.trim().toLowerCase();
+    const exactMatch = stage2Options.find(opt2 => 
+      opt2.trim().toLowerCase() === cleanOpt1
+    );
     
-    for (const s2Opt of stage2Options) {
-      const cleanS2 = s2Opt.trim().toLowerCase();
+    if (exactMatch && !seen.has(cleanOpt1)) {
+      result.push(opt1);
+      seen.add(cleanOpt1);
+      console.log(`     ✅ Exact match: "${opt1}"`);
+    }
+  }
+
+  // Step 2: Add STRONG semantic matches
+  if (result.length < 8) {
+    console.log('   Step 2: Adding strong semantic matches...');
+    for (const opt1 of stage1Options) {
+      if (result.length >= 8) break;
       
-      if (cleanS1 === cleanS2) {
-        // Found common option
-        const originalOpt = s1Opt.trim();
-        const lowerOpt = originalOpt.toLowerCase();
+      const cleanOpt1 = opt1.trim().toLowerCase();
+      if (seen.has(cleanOpt1)) continue;
+      
+      for (const opt2 of stage2Options) {
+        if (result.length >= 8) break;
         
-        if (!seen.has(lowerOpt)) {
-          result.push(originalOpt);
-          seen.add(lowerOpt);
-          console.log(`     ✅ Common: "${originalOpt}"`);
+        if (areOptionsStronglySimilar(opt1, opt2) && !seen.has(cleanOpt1)) {
+          result.push(opt1);
+          seen.add(cleanOpt1);
+          console.log(`     ✅ Strong match: "${opt1}" ↔ "${opt2}"`);
+          break;
         }
-        break;
       }
     }
   }
 
-  // STEP 2: Add Stage 1 options
+  // Step 3: Add remaining Stage 1 options (most relevant)
   if (result.length < 8) {
-    console.log(`   Step 2: Adding Stage 1 options...`);
+    console.log('   Step 3: Adding remaining Stage 1 options...');
+    const remainingStage1 = stage1Options.filter(opt => {
+      const cleanOpt = opt.trim().toLowerCase();
+      return !seen.has(cleanOpt);
+    });
     
-    for (const s1Opt of stage1Options) {
-      if (result.length >= 8) break;
-      
-      const cleanOpt = s1Opt.trim();
-      const lowerOpt = cleanOpt.toLowerCase();
-      
-      if (!seen.has(lowerOpt)) {
-        result.push(cleanOpt);
-        seen.add(lowerOpt);
-        console.log(`     ➕ Stage 1: "${cleanOpt}"`);
-      }
+    // Take top options (max 8 total)
+    const toAdd = Math.min(8 - result.length, remainingStage1.length);
+    for (let i = 0; i < toAdd; i++) {
+      result.push(remainingStage1[i]);
+      seen.add(remainingStage1[i].trim().toLowerCase());
+      console.log(`     ➕ Stage 1: "${remainingStage1[i]}"`);
     }
   }
 
-  // STEP 3: GUARANTEE 8 OPTIONS
+  // Step 4: Add remaining Stage 2 options if still needed
   if (result.length < 8) {
-    console.log(`   Step 3: Adding fallbacks to reach 8...`);
+    console.log('   Step 4: Adding remaining Stage 2 options...');
+    const remainingStage2 = stage2Options.filter(opt => {
+      const cleanOpt = opt.trim().toLowerCase();
+      return !seen.has(cleanOpt);
+    });
     
-    const fallbacks = getSmartFallbacks(normName);
-    
-    for (const fb of fallbacks) {
-      if (result.length >= 8) break;
-      
-      const lowerFb = fb.toLowerCase();
-      if (!seen.has(lowerFb)) {
-        result.push(fb);
-        seen.add(lowerFb);
-        console.log(`     📦 Fallback: "${fb}"`);
-      }
+    const toAdd = Math.min(8 - result.length, remainingStage2.length);
+    for (let i = 0; i < toAdd; i++) {
+      result.push(remainingStage2[i]);
+      seen.add(remainingStage2[i].trim().toLowerCase());
+      console.log(`     ➕ Stage 2: "${remainingStage2[i]}"`);
     }
   }
 
-  console.log(`   ✅ Final: ${result.length} options`);
-  return result;
+  // Step 5: Ensure no duplicates in final result
+  const finalResult: string[] = [];
+  const finalSeen = new Set<string>();
+  
+  for (const opt of result) {
+    const cleanOpt = opt.trim().toLowerCase();
+    if (!finalSeen.has(cleanOpt)) {
+      finalResult.push(opt);
+      finalSeen.add(cleanOpt);
+    }
+  }
+
+  console.log(`   ✅ Final: ${finalResult.length} unique options`);
+  return finalResult.slice(0, 8);
 }
 
-// SMART FALLBACKS BASED ON SPEC TYPE
-function getSmartFallbacks(normName: string): string[] {
-  console.log(`   Getting fallbacks for: "${normName}"`);
+// STRONG OPTION SIMILARITY CHECK
+function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
+  if (!opt1 || !opt2) return false;
   
-  const fallbacks: Record<string, string[]> = {
-    'material': [
-      'SS 304', 'SS 316', 'Mild Steel', 'Galvanized Iron',
-      'Aluminium', 'Copper', 'Brass', 'PVC', 'Carbon Steel'
-    ],
-    'grade': [
-      '304', '316', '430', '201', '202', '304L', '316L',
-      'Grade A', 'Grade B', 'Commercial', 'Industrial'
-    ],
-    'thickness': [
-      '1mm', '2mm', '3mm', '5mm', '10mm', '15mm', '20mm', '25mm',
-      '0.5mm', '1.5mm', '4mm', '6mm', '8mm'
-    ],
-    'diameter': [
-      '15mm', '20mm', '25mm', '32mm', '40mm', '50mm',
-      '1/2"', '3/4"', '1"', '2"', '3"', '4"'
-    ],
-    'size': [
-      'Small', 'Medium', 'Large', 'Extra Large',
-      'Sheet', 'Plate', 'Coil', 'Pipe', 'Rod'
-    ],
-    'length': [
-      '6m', '12m', 'Random', 'Custom',
-      '3ft', '6ft', '10ft', '20ft', '1m', '2m'
-    ],
-    'width': [
-      '1000mm', '1250mm', '1500mm', '2000mm',
-      '3ft', '4ft', '5ft', '6ft'
-    ],
-    'height': [
-      '1000mm', '1500mm', '2000mm', '2500mm',
-      '3ft', '4ft', '5ft', '6ft'
-    ],
-    'color': [
-      'White', 'Black', 'Blue', 'Red', 'Green', 'Yellow',
-      'Gray', 'Silver', 'Gold', 'Brown'
-    ],
-    'finish': [
-      'Mill Finish', 'Polished', 'Galvanized', 'Brushed',
-      'Coated', 'Painted', 'Anodized', 'Matt'
-    ],
-    'type': [
-      'Standard', 'Premium', 'Economy', 'Commercial',
-      'Industrial', 'Heavy Duty', 'Light Duty', 'Custom'
-    ],
-    'shape': [
-      'Round', 'Square', 'Rectangular', 'Hexagonal',
-      'Flat', 'Angle', 'Channel', 'Pipe'
-    ],
-    'weight': [
-      '1kg', '5kg', '10kg', '25kg', '50kg', '100kg',
-      '500kg', '1000kg'
-    ],
-    'capacity': [
-      '10L', '20L', '50L', '100L', '200L', '500L',
-      '1000L', '2000L'
-    ],
-    'brand': [
-      'Tata', 'Jindal', 'SAIL', 'Essar', 'Hindalco',
-      'Godrej', 'Asian Paints', 'Berger'
-    ],
-    'quality': [
-      'Grade A', 'Grade B', 'Commercial', 'Industrial',
-      'Premium', 'Standard', 'Economy', 'Export Quality'
-    ]
-  };
-
-  // Find matching fallback
-  for (const [key, options] of Object.entries(fallbacks)) {
-    if (normName.includes(key)) {
-      console.log(`   Using "${key}" fallbacks`);
-      return options;
+  const clean1 = opt1.toLowerCase().trim();
+  const clean2 = opt2.toLowerCase().trim();
+  
+  // Direct match
+  if (clean1 === clean2) return true;
+  
+  // Remove spaces and compare
+  const noSpace1 = clean1.replace(/\s+/g, '');
+  const noSpace2 = clean2.replace(/\s+/g, '');
+  if (noSpace1 === noSpace2) return true;
+  
+  // Material and grade equivalences
+  const materialGroups = [
+    ['304', 'ss304', 'ss 304', 'stainless steel 304'],
+    ['316', 'ss316', 'ss 316', 'stainless steel 316'],
+    ['430', 'ss430', 'ss 430'],
+    ['201', 'ss201', 'ss 201'],
+    ['202', 'ss202', 'ss 202'],
+    ['ms', 'mild steel', 'carbon steel'],
+    ['gi', 'galvanized iron'],
+    ['aluminium', 'aluminum'],
+  ];
+  
+  for (const group of materialGroups) {
+    const inGroup1 = group.some(term => clean1.includes(term));
+    const inGroup2 = group.some(term => clean2.includes(term));
+    if (inGroup1 && inGroup2) {
+      // Check if same numeric grade
+      const num1 = clean1.match(/\b(\d+)\b/)?.[1];
+      const num2 = clean2.match(/\b(\d+)\b/)?.[1];
+      if (num1 && num2 && num1 !== num2) return false;
+      return true;
     }
   }
-
-  // Default fallback
-  console.log(`   Using default fallbacks`);
-  return [
-    'Standard', 'Premium', 'Economy', 'Commercial',
-    'Industrial', 'Custom', 'Type A', 'Type B',
-    'Small', 'Medium', 'Large', 'Extra Large'
+  
+  // Measurement matching
+  const getMeasurement = (str: string) => {
+    const match = str.match(/(\d+(\.\d+)?)\s*(mm|cm|m|inch|in|ft|"|')?/i);
+    if (!match) return null;
+    
+    const value = parseFloat(match[1]);
+    const unit = match[3]?.toLowerCase() || '';
+    
+    // Convert to mm for comparison
+    if (unit === 'cm' || unit === 'centimeter') return value * 10;
+    if (unit === 'm' || unit === 'meter') return value * 1000;
+    if (unit === 'inch' || unit === 'in' || unit === '"') return value * 25.4;
+    if (unit === 'ft' || unit === 'feet' || unit === "'") return value * 304.8;
+    return value; // assume mm
+  };
+  
+  const meas1 = getMeasurement(clean1);
+  const meas2 = getMeasurement(clean2);
+  
+  if (meas1 && meas2 && Math.abs(meas1 - meas2) < 0.01) {
+    return true;
+  }
+  
+  // Shape equivalences
+  const shapeGroups = [
+    ['round', 'circular', 'circle'],
+    ['square', 'squared'],
+    ['rectangular', 'rectangle'],
+    ['hexagonal', 'hexagon'],
+    ['flat', 'flat bar'],
+    ['angle', 'l shape', 'l-shaped'],
+    ['channel', 'c shape', 'c-shaped'],
+    ['pipe', 'tube', 'tubular'],
+    ['slotted', 'slot'],
   ];
+  
+  for (const group of shapeGroups) {
+    const inGroup1 = group.some(term => clean1.includes(term));
+    const inGroup2 = group.some(term => clean2.includes(term));
+    if (inGroup1 && inGroup2) return true;
+  }
+  
+  return false;
 }
 
 // ============================================
-// COMPARE RESULTS FUNCTION (unchanged)
+// COMPARE RESULTS FUNCTION
 // ============================================
 
 export function compareResults(
@@ -1078,94 +1132,7 @@ function extractAllSpecsWithOptions(specs: Stage1Output): Array<{ spec_name: str
 }
 
 function isSemanticallySimilarOption(opt1: string, opt2: string): boolean {
-  if (!opt1 || !opt2) return false;
-  
-  // Pehle basic cleaning
-  const clean1 = opt1.toLowerCase().trim();
-  const clean2 = opt2.toLowerCase().trim();
-  
-  // Direct match check
-  if (clean1 === clean2) return true;
-  
-  // Remove spaces and check
-  const noSpace1 = clean1.replace(/\s+/g, '');
-  const noSpace2 = clean2.replace(/\s+/g, '');
-  if (noSpace1 === noSpace2) return true;
-  
-  // Special cases for common terms
-  const equivalences: Record<string, string[]> = {
-    'round': ['circular', 'circle', 'round shape'],
-    'square': ['squared', 'square shape', 'box'],
-    'slotted': ['slot', 'slotted hole', 'with slot'],
-    'rectangular': ['rectangle', 'rectangular shape'],
-    'hexagonal': ['hexagon', 'hexagonal shape'],
-    'flat': ['flat shape', 'flat bar'],
-    'angle': ['l-shape', 'angle bar'],
-    'channel': ['c-shape', 'channel bar'],
-    'pipe': ['tubular', 'tube'],
-    '304': ['304l', '304h', '304n', '304 stainless', 'stainless 304', 'ss304', 'ss 304'],
-    '316': ['316l', '316ti', '316 stainless', 'stainless 316', 'ss316', 'ss 316'],
-    'ss304': ['ss 304', 'stainless steel 304'],
-    'ss316': ['ss 316', 'stainless steel 316'],
-    'ms': ['mild steel', 'mildsteel', 'carbon steel'],
-    'gi': ['galvanized iron'],
-    'aluminium': ['aluminum'],
-  };
-  
-  // Check if options are in equivalence groups
-  for (const [base, alts] of Object.entries(equivalences)) {
-    const allVariants = [base, ...alts];
-    
-    // Check if clean1 contains any variant
-    const hasOpt1 = allVariants.some(variant => {
-      const regex = new RegExp(`\\b${variant}\\b`, 'i');
-      return regex.test(clean1) || clean1.includes(variant);
-    });
-    
-    // Check if clean2 contains any variant
-    const hasOpt2 = allVariants.some(variant => {
-      const regex = new RegExp(`\\b${variant}\\b`, 'i');
-      return regex.test(clean2) || clean2.includes(variant);
-    });
-    
-    if (hasOpt1 && hasOpt2) {
-      return true;
-    }
-  }
-  
-  // Check for partial matches (e.g., "round" in "round bar")
-  if (clean1.includes(clean2) || clean2.includes(clean1)) {
-    return true;
-  }
-  
-  // For shape-related options, check common terms
-  const shapeTerms = ['round', 'square', 'slotted', 'rectangular', 'hexagonal', 'flat', 'angle', 'channel', 'pipe'];
-  const hasShape1 = shapeTerms.some(term => clean1.includes(term));
-  const hasShape2 = shapeTerms.some(term => clean2.includes(term));
-  
-  if (hasShape1 && hasShape2) {
-    // Check if they contain the same shape term
-    for (const term of shapeTerms) {
-      if (clean1.includes(term) && clean2.includes(term)) {
-        return true;
-      }
-    }
-  }
-  
-  // Simple word-based similarity check
-  const words1 = clean1.split(/\s+/);
-  const words2 = clean2.split(/\s+/);
-  
-  // Check if any significant word matches
-  const commonWords = words1.filter(word => 
-    word.length > 2 && words2.includes(word)
-  );
-  
-  if (commonWords.length > 0) {
-    return true;
-  }
-  
-  return false;
+  return areOptionsStronglySimilar(opt1, opt2);
 }
 
 function findCommonOptions(options1: string[], options2: string[]): string[] {
@@ -1175,7 +1142,7 @@ function findCommonOptions(options1: string[], options2: string[]): string[] {
   options1.forEach((opt1, i) => {
     options2.forEach((opt2, j) => {
       if (usedIndices.has(j)) return;
-      if (isSemanticallySimilarOption(opt1, opt2)) {
+      if (areOptionsStronglySimilar(opt1, opt2)) {
         common.push(opt1);
         usedIndices.add(j);
       }
