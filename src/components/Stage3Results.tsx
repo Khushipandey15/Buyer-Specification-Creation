@@ -149,11 +149,6 @@ function SpecCard({
             <span className={`inline-block ${colors.badge} px-2 py-1 rounded`}>
               {spec.category}
             </span>
-            {'priority' in spec && spec.priority > 0 && (
-              <span className="inline-block ml-2 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs">
-                Priority: {spec.priority}
-              </span>
-            )}
             {spec.options.length === 0 && (
               <span className="inline-block ml-2 text-gray-500 text-xs">
                 (No common options)
