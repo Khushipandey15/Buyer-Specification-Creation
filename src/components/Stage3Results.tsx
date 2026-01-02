@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import type { Stage1Output, ISQ } from "../types";
 
 interface Stage3ResultsProps {
@@ -30,9 +30,14 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
   }
 
   const { commonSpecs, buyerISQs } = extractCommonAndBuyerSpecs(stage1Data, isqs);
+  const [showAllBuyerISQs, setShowAllBuyerISQs] = useState(false);
 
   const primaryCommonSpecs = commonSpecs.filter((s) => s.category === "Primary");
   const secondaryCommonSpecs = commonSpecs.filter((s) => s.category === "Secondary");
+
+  // Determine which Buyer ISQs to show
+  const displayedBuyerISQs = showAllBuyerISQs ? buyerISQs : buyerISQs.slice(0, 2);
+  const hasMoreBuyerISQs = buyerISQs.length > 2;
 
   return (
     <div>
@@ -103,18 +108,45 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
                   Buyer ISQs
                 </h3>
                 <div className="text-sm text-amber-700 font-medium">
-                  Top {buyerISQs.length} from common specs
+                  Based on buyer search patterns
                 </div>
               </div>
               <p className="text-sm text-amber-700 mb-6">
-                Selected from common specs based on buyer search patterns
+                Important specifications frequently searched by buyers
               </p>
 
               {buyerISQs.length > 0 ? (
-                <div className="space-y-6">
-                  {buyerISQs.map((spec, idx) => (
-                    <SpecCard key={idx} spec={spec} color="amber" />
-                  ))}
+                <div>
+                  <div className="space-y-6">
+                    {displayedBuyerISQs.map((spec, idx) => (
+                      <SpecCard key={idx} spec={spec} color="amber" />
+                    ))}
+                  </div>
+                  
+                  {hasMoreBuyerISQs && (
+                    <div className="mt-6 text-center">
+                      <button
+                        onClick={() => setShowAllBuyerISQs(!showAllBuyerISQs)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 font-medium rounded-lg transition-colors"
+                      >
+                        {showAllBuyerISQs ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                            </svg>
+                            Show Less
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                            Show All {buyerISQs.length} Buyer ISQs
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="bg-white border border-amber-200 p-6 rounded-lg text-center">
@@ -139,8 +171,8 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
           <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg">
             <p className="text-sm text-gray-700">
               <strong>Buyer ISQs:</strong> {buyerISQs.length} specification
-              {buyerISQs.length !== 1 ? "s" : ""} selected from common specs.
-              {buyerISQs.length > 0 && ' Highlighted for important buyer search patterns.'}
+              {buyerISQs.length !== 1 ? "s" : ""} based on buyer search patterns.
+              {hasMoreBuyerISQs && !showAllBuyerISQs && ` Showing 2 of ${buyerISQs.length}.`}
             </p>
           </div>
         </div>
