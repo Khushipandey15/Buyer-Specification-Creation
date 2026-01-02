@@ -41,70 +41,84 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
         Specifications common to both Stage 1 and Stage 2
       </p>
 
-      {commonSpecs.length === 0 ? (
+      {commonSpecs.length === 0 && buyerISQs.length === 0 ? (
         <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-yellow-800">
           <p className="font-semibold">No common specifications found</p>
           <p className="text-sm mt-2">There are no specifications that appear in both stages.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2">
-            <div className="space-y-8">
-              {primaryCommonSpecs.length > 0 && (
-                <div>
-                  <h3 className="text-lg font-semibold text-blue-600 mb-4">Common Primary Specs ({primaryCommonSpecs.length})</h3>
-                  <div className="grid gap-4">
-                    {primaryCommonSpecs.map((spec, idx) => (
-                      <SpecCard key={idx} spec={spec} color="blue" />
-                    ))}
-                  </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column: Common Specifications */}
+          <div>
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-lg p-6 h-full">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-blue-900 flex items-center gap-2">
+                  <span className="inline-block w-10 h-10 bg-blue-300 rounded-full flex items-center justify-center text-blue-900 text-lg font-bold">
+                    {commonSpecs.length}
+                  </span>
+                  Common Specifications
+                </h3>
+                <div className="text-sm text-blue-700 font-medium">
+                  {primaryCommonSpecs.length} Primary, {secondaryCommonSpecs.length} Secondary
                 </div>
-              )}
+              </div>
+              <p className="text-sm text-blue-700 mb-6">
+                Specifications that appear in both Stage 1 and Stage 2
+              </p>
 
-              {secondaryCommonSpecs.length > 0 && (
-                <div>
-                  <h3 className="text-lg font-semibold text-green-600 mb-4">Common Secondary Specs ({secondaryCommonSpecs.length})</h3>
-                  <div className="grid gap-4">
-                    {secondaryCommonSpecs.map((spec, idx) => (
-                      <SpecCard key={idx} spec={spec} color="green" />
-                    ))}
+              <div className="space-y-6">
+                {primaryCommonSpecs.length > 0 && (
+                  <div>
+                    <h4 className="text-lg font-semibold text-blue-700 mb-3">Primary Specs</h4>
+                    <div className="space-y-4">
+                      {primaryCommonSpecs.map((spec, idx) => (
+                        <SpecCard key={idx} spec={spec} color="blue" />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                {secondaryCommonSpecs.length > 0 && (
+                  <div>
+                    <h4 className="text-lg font-semibold text-green-700 mb-3">Secondary Specs</h4>
+                    <div className="space-y-4">
+                      {secondaryCommonSpecs.map((spec, idx) => (
+                        <SpecCard key={idx} spec={spec} color="green" />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="lg:col-span-1">
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-lg p-6 sticky top-6">
-              <h3 className="text-lg font-semibold text-amber-900 mb-4 flex items-center gap-2">
-                <span className="inline-block w-8 h-8 bg-amber-300 rounded-full flex items-center justify-center text-amber-900 text-sm font-bold">
-                  {buyerISQs.length}
-                </span>
-                Buyer ISQs
-              </h3>
-              <p className="text-xs text-amber-700 mb-4">Selected from common specs based on buyer search patterns</p>
+          {/* Right Column: Buyer ISQs */}
+          <div>
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-lg p-6 h-full">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-amber-900 flex items-center gap-2">
+                  <span className="inline-block w-10 h-10 bg-amber-300 rounded-full flex items-center justify-center text-amber-900 text-lg font-bold">
+                    {buyerISQs.length}
+                  </span>
+                  Buyer ISQs
+                </h3>
+                <div className="text-sm text-amber-700 font-medium">
+                  Top {buyerISQs.length} from common specs
+                </div>
+              </div>
+              <p className="text-sm text-amber-700 mb-6">
+                Selected from common specs based on buyer search patterns
+              </p>
 
               {buyerISQs.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-6">
                   {buyerISQs.map((spec, idx) => (
-                    <div key={idx} className="bg-white border border-amber-200 p-4 rounded-lg">
-                      <div className="font-semibold text-amber-900 mb-2">{spec.spec_name}</div>
-                      <div className="flex flex-wrap gap-2">
-                        {spec.options.map((option, oIdx) => (
-                          <span
-                            key={oIdx}
-                            className="inline-block bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-medium"
-                          >
-                            {option}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                    <SpecCard key={idx} spec={spec} color="amber" />
                   ))}
                 </div>
               ) : (
-                <div className="bg-white border border-amber-200 p-4 rounded-lg text-center">
-                  <p className="text-sm text-gray-600">No buyer ISQs available</p>
+                <div className="bg-white border border-amber-200 p-6 rounded-lg text-center">
+                  <p className="text-gray-600">No buyer ISQs available</p>
                 </div>
               )}
             </div>
@@ -113,12 +127,22 @@ export default function Stage3Results({ stage1Data, isqs }: Stage3ResultsProps) 
       )}
 
       <div className="mt-8 pt-8 border-t-2 border-gray-200">
-        <div className="bg-blue-50 border border-blue-200 p-6 rounded-lg">
-          <p className="text-sm text-gray-700">
-            <strong>Summary:</strong> {commonSpecs.length} common specification
-            {commonSpecs.length !== 1 ? "s" : ""} found across Primary and Secondary tiers.
-            {buyerISQs.length > 0 && ` ${buyerISQs.length} buyer ISQ(s) highlighted for important specs.`}
-          </p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+            <p className="text-sm text-gray-700">
+              <strong>Common Specifications:</strong> {commonSpecs.length} specification
+              {commonSpecs.length !== 1 ? "s" : ""} found across both stages.
+              {primaryCommonSpecs.length > 0 && ` ${primaryCommonSpecs.length} Primary,`}
+              {secondaryCommonSpecs.length > 0 && ` ${secondaryCommonSpecs.length} Secondary`}
+            </p>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg">
+            <p className="text-sm text-gray-700">
+              <strong>Buyer ISQs:</strong> {buyerISQs.length} specification
+              {buyerISQs.length !== 1 ? "s" : ""} selected from common specs.
+              {buyerISQs.length > 0 && ' Highlighted for important buyer search patterns.'}
+            </p>
+          </div>
         </div>
       </div>
     </div>
