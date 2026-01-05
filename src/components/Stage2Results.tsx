@@ -10,21 +10,6 @@ interface Stage2ResultsProps {
 }
 
 export default function Stage2Results({ isqs, onDownloadExcel }: Stage2ResultsProps) {
-  // Validate and clean the data before rendering
-  const cleanISQs = React.useMemo(() => {
-    const cleanedConfig: ISQ = {
-      name: isqs.config?.name?.trim() || "Specification",
-      options: cleanOptions(isqs.config?.options || [])
-    };
-
-    const cleanedKeys: ISQ[] = (isqs.keys || []).map((key, index) => ({
-      name: key?.name?.trim() || `Specification ${index + 1}`,
-      options: cleanOptions(key?.options || [])
-    })).filter(key => key.options.length > 0); // Remove keys with no options
-
-    return { config: cleanedConfig, keys: cleanedKeys };
-  }, [isqs]);
-
   // Function to clean options
   const cleanOptions = (options: string[]): string[] => {
     if (!Array.isArray(options)) return [];
@@ -55,6 +40,21 @@ export default function Stage2Results({ isqs, onDownloadExcel }: Stage2ResultsPr
       })
       .slice(0, 10); // Limit to 10 options max
   };
+
+  // Validate and clean the data before rendering
+  const cleanISQs = React.useMemo(() => {
+    const cleanedConfig: ISQ = {
+      name: isqs.config?.name?.trim() || "Specification",
+      options: cleanOptions(isqs.config?.options || [])
+    };
+
+    const cleanedKeys: ISQ[] = (isqs.keys || []).map((key, index) => ({
+      name: key?.name?.trim() || `Specification ${index + 1}`,
+      options: cleanOptions(key?.options || [])
+    })).filter(key => key.options.length > 0);
+
+    return { config: cleanedConfig, keys: cleanedKeys };
+  }, [isqs]);
 
   // Check if data is valid
   const isValidData = cleanISQs.config.options.length > 0 || 
