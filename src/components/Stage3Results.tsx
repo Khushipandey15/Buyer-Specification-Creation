@@ -694,18 +694,18 @@ function getOptimizedBuyerOptions(
   }
   
   // Step 4: Add remaining Stage 2 options if still needed
-  if (result.length < 8) {
-    const remainingStage2 = stage2Options.filter(opt => {
-      const cleanOpt = opt.trim().toLowerCase();
-      return !seen.has(cleanOpt);
-    });
+  //if (result.length < 8) {
+  //  const remainingStage2 = stage2Options.filter(opt => {
+  //    const cleanOpt = opt.trim().toLowerCase();
+  //    return !seen.has(cleanOpt);
+  //  });
     
-    const toAdd = Math.min(8 - result.length, remainingStage2.length);
-    for (let i = 0; i < toAdd; i++) {
-      result.push(remainingStage2[i]);
-      seen.add(remainingStage2[i].trim().toLowerCase());
-    }
-  }
+   // const toAdd = Math.min(8 - result.length, remainingStage2.length);
+   // for (let i = 0; i < toAdd; i++) {
+   //   result.push(remainingStage2[i]);
+   //   seen.add(remainingStage2[i].trim().toLowerCase());
+   // }
+  //}
   
   // Step 5: Ensure no duplicates in final result
   const finalResult: string[] = [];
