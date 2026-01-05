@@ -913,20 +913,20 @@ function getOptimizedBuyerISQOptions(
   }
 
   // Step 4: Add remaining Stage 2 options if still needed
-  if (result.length < 8) {
-    console.log('   Step 4: Adding remaining Stage 2 options...');
-    const remainingStage2 = stage2Options.filter(opt => {
-      const cleanOpt = opt.trim().toLowerCase();
-      return !seen.has(cleanOpt);
-    });
+ // if (result.length < 8) {
+   // console.log('   Step 4: Adding remaining Stage 2 options...');
+   // const remainingStage2 = stage2Options.filter(opt => {
+    //  const cleanOpt = opt.trim().toLowerCase();
+     // return !seen.has(cleanOpt);
+  //  });
     
-    const toAdd = Math.min(8 - result.length, remainingStage2.length);
-    for (let i = 0; i < toAdd; i++) {
-      result.push(remainingStage2[i]);
-      seen.add(remainingStage2[i].trim().toLowerCase());
-      console.log(`     ➕ Stage 2: "${remainingStage2[i]}"`);
-    }
-  }
+   // const toAdd = Math.min(8 - result.length, remainingStage2.length);
+   // for (let i = 0; i < toAdd; i++) {
+    //  result.push(remainingStage2[i]);
+    //  seen.add(remainingStage2[i].trim().toLowerCase());
+     // console.log(`     ➕ Stage 2: "${remainingStage2[i]}"`);
+   // }
+ // }
 
   // Step 5: Ensure no duplicates in final result
   const finalResult: string[] = [];
