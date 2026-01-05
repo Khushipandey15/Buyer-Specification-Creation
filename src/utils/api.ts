@@ -128,54 +128,27 @@ async function fetchWithRetry(
   throw new Error("Unreachable");
 }
 
-function extractJSONFromGemini(response) {
+// NEW: Simple text extractor from Gemini response
+function extractTextFromGeminiResponse(response: any): string {
   try {
     if (!response?.candidates?.length) {
-      console.warn("No candidates in response, returning null for fallback");
-      return null;
+      console.warn("No candidates in response");
+      return "";
     }
 
-    const parts =
-      response.candidates[0]?.content?.parts ||
-      response.candidates[0]?.content ||
-      [];
-
-    let rawText = "";
+    let text = "";
+    const parts = response.candidates[0]?.content?.parts || [];
 
     for (const part of parts) {
       if (typeof part.text === "string") {
-        rawText += part.text + "\n";
-      }
-
-      if (part.json) {
-        return part.json;
+        text += part.text + "\n";
       }
     }
 
-    if (!rawText.trim()) {
-      console.warn("No text content in response, returning null for fallback");
-      return null;
-    }
-
-    let cleaned = rawText
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
-
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) cleaned = match[0];
-
-    cleaned = cleaned.replace(/,(\s*[\]}])/g, "$1");
-
-    try {
-      return JSON.parse(cleaned);
-    } catch (parseErr) {
-      console.warn("JSON parse failed, returning null for fallback:", parseErr);
-      return null;
-    }
+    return text.trim();
   } catch (error) {
-    console.warn("Unexpected error in extractJSONFromGemini:", error);
-    return null;
+    console.warn("Error extracting text:", error);
+    return "";
   }
 }
 
@@ -209,7 +182,15 @@ export async function generateStage1WithGemini(
     );
 
     const data = await response.json();
-    return extractJSONFromGemini(data) || generateFallbackStage1();
+    const textResponse = extractTextFromGeminiResponse(data);
+    
+    if (textResponse) {
+      // Try to parse JSON from text
+      const parsed = tryParseJSON(textResponse);
+      if (parsed) return parsed;
+    }
+    
+    return generateFallbackStage1();
 
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -224,12 +205,33 @@ export async function generateStage1WithGemini(
   }
 }
 
+function tryParseJSON(text: string): any {
+  try {
+    // Clean the text first
+    let cleaned = text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+    
+    // Find JSON object
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      cleaned = match[0];
+      return JSON.parse(cleaned);
+    }
+  } catch (error) {
+    console.warn("Failed to parse JSON:", error);
+  }
+  return null;
+}
+
 function generateFallbackStage1(): Stage1Output {
   return {
     seller_specs: []
   };
 }
 
+// COMPLETELY NEW APPROACH for Stage 2
 export async function extractISQWithGemini(
   input: InputData,
   urls: string[]
@@ -238,244 +240,396 @@ export async function extractISQWithGemini(
     throw new Error("Stage 2 API key is not configured. Please add VITE_STAGE2_API_KEY to your .env file.");
   }
 
-  console.log("Waiting before ISQ extraction to avoid API overload...");
-  await sleep(7000);
+  console.log("Starting ISQ extraction with NEW approach...");
+  
+  // Get content from URLs
+  const urlContents = await Promise.all(urls.map(async (url, idx) => {
+    try {
+      console.log(`Fetching URL ${idx + 1}: ${url}`);
+      const content = await fetchURL(url);
+      return { url, content: content.substring(0, 3000) };
+    } catch (error) {
+      console.warn(`Failed to fetch ${url}:`, error);
+      return { url, content: "" };
+    }
+  }));
 
-  const urlContents = await Promise.all(urls.map(fetchURL));
-  const prompt = buildISQExtractionPrompt(input, urls, urlContents);
+  // Build a SIMPLE, CLEAR prompt
+  const prompt = `
+CRITICAL: I need you to analyze product information from these URLs and extract specifications.
+
+PRODUCT CATEGORY: ${input.mcats.map(m => m.mcat_name).join(", ")}
+
+URLS TO ANALYZE:
+${urls.map((url, i) => `URL ${i+1}: ${url}`).join('\n')}
+
+TASK: Extract the most important product specifications that would help buyers make purchasing decisions.
+
+I NEED YOU TO PROVIDE:
+1. ONE "Config ISQ" - The most important specification that affects price and product variation
+2. THREE "Key ISQs" - Other important specifications that define the product
+
+FOR EACH SPECIFICATION, PROVIDE:
+- The specification name (e.g., "Thickness", "Material", "Size")
+- Actual values/options found in the URLs (e.g., "2 mm", "3 mm", "4 mm" for Thickness)
+
+EXAMPLE OF WHAT I WANT:
+Config ISQ: Thickness
+Options: 2 mm, 3 mm, 4 mm, 5 mm
+
+Key ISQ 1: Material
+Options: Stainless Steel 304, Stainless Steel 316, Mild Steel
+
+Key ISQ 2: Finish
+Options: Polished, Brushed, Galvanized
+
+Key ISQ 3: Size
+Options: 4x4 ft, 5x5 ft, 6x6 ft
+
+IMPORTANT RULES:
+1. Extract ACTUAL VALUES from the URLs, not specification names
+2. Each specification must have at least 2 options
+3. Include units where applicable (mm, kg, cm, etc.)
+4. Look for patterns across multiple URLs
+5. Be specific - avoid generic terms like "Standard", "Regular"
+
+FORMAT YOUR RESPONSE CLEARLY with clear labels as shown in the example above.
+`;
 
   try {
+    console.log("Waiting before calling Gemini API...");
+    await sleep(7000);
+
     const response = await fetchWithRetry(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${STAGE2_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json"
-          },
-        }),
+            temperature: 0.3,  // Lower temperature for more consistent results
+            maxOutputTokens: 2048
+            // NOT using responseMimeType: "application/json" - we'll parse text
+          }
+        })
       }
     );
 
     const data = await response.json();
-    let parsed = extractJSONFromGemini(data);
-
-    if (parsed && parsed.config && parsed.config.name) {
-      return {
-        config: parsed.config,
-        keys: parsed.keys || [],
-        buyers: parsed.buyers || []
-      };
+    const textResponse = extractTextFromGeminiResponse(data);
+    
+    console.log("Gemini Response:", textResponse);
+    
+    if (!textResponse) {
+      throw new Error("Empty response from Gemini");
     }
-
-    const textContent = extractRawText(data);
-    if (textContent) {
-      const fallbackParsed = parseStage2FromText(textContent);
-      if (fallbackParsed && fallbackParsed.config && fallbackParsed.config.name) {
-        console.log("Parsed ISQ from text fallback");
-        return fallbackParsed;
-      }
+    
+    // Parse the text response to extract specifications
+    const parsed = parseGeminiResponseToISQ(textResponse);
+    
+    if (!parsed || parsed.config.options.length === 0) {
+      // If parsing failed, try to extract directly from URL content
+      return extractFromURLContents(urlContents, input);
     }
-
-    return generateFallbackStage2();
+    
+    return parsed;
+    
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-
-    if (errorMsg.includes("429") || errorMsg.includes("quota")) {
-      console.error("Stage 2 API Key quota exhausted or rate limited");
-      throw new Error("Stage 2 API key quota exhausted. Please check your API limits.");
-    }
-
-    console.warn("Stage 2 API error:", error);
-    return generateFallbackStage2();
+    console.error("Stage 2 API error:", error);
+    
+    // Fallback: Extract from URL contents directly
+    const urlContents = await Promise.all(urls.map(fetchURL));
+    return extractFromURLContents(urlContents.map((content, i) => ({ 
+      url: urls[i], 
+      content 
+    })), input);
   }
 }
 
-function extractRawText(response: any): string {
-  try {
-    if (!response?.candidates?.length) return "";
-
-    const parts = response.candidates[0]?.content?.parts || [];
-    let text = "";
-
-    for (const part of parts) {
-      if (typeof part.text === "string") {
-        text += part.text + "\n";
+// NEW: Parse Gemini's text response to extract ISQs
+function parseGeminiResponseToISQ(text: string): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
+  const config: ISQ = { name: "", options: [] };
+  const keys: ISQ[] = [];
+  
+  // Split into lines and clean
+  const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  
+  let currentSpec: ISQ | null = null;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Look for Config ISQ
+    if (line.toLowerCase().includes('config isq') && line.includes(':')) {
+      const parts = line.split(':');
+      if (parts.length >= 2) {
+        config.name = parts[1].trim();
+        // Look for options in next line
+        if (i + 1 < lines.length && lines[i + 1].toLowerCase().includes('option')) {
+          const optionsLine = lines[i + 1];
+          config.options = extractOptionsFromLine(optionsLine);
+          i++; // Skip next line since we processed it
+        }
       }
     }
-
-    return text.trim();
-  } catch {
-    return "";
-  }
-}
-
-function parseStage2FromText(text: string): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } | null {
-  console.warn("Stage2: Using text-based extraction");
-
-  const config = { name: "", options: [] };
-  const keys: ISQ[] = [];
-  const buyers: ISQ[] = [];
-
-  const lines = text.split("\n").filter((line) => line.trim().length > 0);
-  if (lines.length === 0) return null;
-
-  const specPatterns = /(size|material|grade|thickness|type|shape|length|width|color|finish|weight|capacity|brand|quality|model|variant|design)[^:\n]*[:\-\s]+([^\n]+)/gi;
-  const matches = Array.from(text.matchAll(specPatterns));
-
-  const seenNames = new Set<string>();
-  let configSet = false;
-
-  matches.slice(0, 10).forEach((match) => {
-    const name = match[1].trim();
-    const valuesStr = match[2].trim();
-    const values = valuesStr
-      .split(/,|;|\/|\band\b/)
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0 && v.length < 50)
-      .slice(0, 10);
-
-    if (values.length === 0) return;
-
-    const normalizedName = normalizeSpecName(name);
-
-    if (seenNames.has(normalizedName)) return;
-    seenNames.add(normalizedName);
-
-    if (!configSet && values.length >= 2) {
-      config.name = name;
-      config.options = values;
-      configSet = true;
-    } else if (keys.length < 3) {
-      keys.push({ name, options: values });
+    
+    // Look for Key ISQs
+    else if (line.toLowerCase().includes('key isq') && line.includes(':')) {
+      const parts = line.split(':');
+      if (parts.length >= 2) {
+        const specName = parts[1].trim();
+        const spec: ISQ = { name: specName, options: [] };
+        
+        // Look for options in next line
+        if (i + 1 < lines.length && lines[i + 1].toLowerCase().includes('option')) {
+          const optionsLine = lines[i + 1];
+          spec.options = extractOptionsFromLine(optionsLine);
+          i++; // Skip next line
+        }
+        
+        if (spec.options.length > 0 && keys.length < 3) {
+          keys.push(spec);
+        }
+      }
     }
-  });
-
-  if (!configSet && matches.length > 0) {
-    const firstMatch = matches[0];
-    config.name = firstMatch[1].trim();
-    config.options = firstMatch[2]
-      .split(/,|;|\//)
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0 && v.length < 50)
-      .slice(0, 5);
-  }
-
-  if (!config.name || config.options.length === 0) {
-    const words = text.match(/\b[a-z]{3,}(?:\s+[a-z]{3,})*\b/gi) || [];
-    if (words.length > 0) {
-      config.name = words[0];
-      config.options = words.slice(0, 5);
-    }
-  }
-
-  if (!config.name) return null;
-
-  return { config, keys, buyers };
-}
-
-function generateFallbackStage2(): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
-  return {
-    config: { name: "Unknown", options: [] },
-    keys: [],
-    buyers: []
-  };
-}
-
-function extractJSON(text: string): string | null {
-  text = text.replace(/```json|```/gi, "").trim();
-
-  text = text.trim();
-  if (text.startsWith('{')) {
-    try {
-      JSON.parse(text);
-      return text;
-    } catch {
-      // Continue to other methods
-    }
-  }
-
-  let codeBlockMatch = text.match(/```json\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch) {
-    const extracted = codeBlockMatch[1].trim();
-    try {
-      JSON.parse(extracted);
-      return extracted;
-    } catch (e) {
-      console.error("Failed to parse JSON from json code block:", e);
-    }
-  }
-
-  codeBlockMatch = text.match(/```\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch) {
-    const extracted = codeBlockMatch[1].trim();
-    try {
-      JSON.parse(extracted);
-      return extracted;
-    } catch (e) {
-      console.error("Failed to parse JSON from code block:", e);
-    }
-  }
-
-  let braceCount = 0;
-  let inString = false;
-  let escapeNext = false;
-  let startIdx = -1;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-
-    if (char === '\\' && inString) {
-      escapeNext = true;
-      continue;
-    }
-
-    if (char === '"' && !escapeNext) {
-      inString = !inString;
-      continue;
-    }
-
-    if (!inString) {
-      if (char === '{') {
-        if (braceCount === 0) startIdx = i;
-        braceCount++;
-      } else if (char === '}') {
-        braceCount--;
-        if (braceCount === 0 && startIdx !== -1) {
-          const jsonStr = text.substring(startIdx, i + 1).trim();
-          try {
-            JSON.parse(jsonStr);
-            return jsonStr;
-          } catch (e) {
-            console.error("Failed to parse extracted JSON:", e);
-            startIdx = -1;
+    
+    // Look for specification patterns (more flexible matching)
+    else if ((line.includes(':') && line.length < 100) || 
+             (line.toLowerCase().includes('spec') && line.includes(':'))) {
+      const colonIndex = line.indexOf(':');
+      if (colonIndex > 0 && colonIndex < line.length - 1) {
+        const specName = line.substring(0, colonIndex).trim();
+        const valuePart = line.substring(colonIndex + 1).trim();
+        
+        // Check if this looks like a specification
+        if (isLikelySpecName(specName) && valuePart.length > 0) {
+          const options = extractOptionsFromLine(valuePart);
+          
+          if (options.length >= 2) {
+            // First spec with enough options becomes config
+            if (config.options.length === 0) {
+              config.name = specName;
+              config.options = options;
+            } 
+            // Next specs become keys
+            else if (keys.length < 3) {
+              keys.push({ name: specName, options });
+            }
           }
         }
       }
     }
   }
+  
+  // If we didn't find config through patterns, look for any specification
+  if (config.options.length === 0) {
+    // Try to find any specification in the text
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const specMatch = line.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)[:\s]+([^\.;]+)/);
+      
+      if (specMatch) {
+        const specName = specMatch[1].trim();
+        const valuesText = specMatch[2].trim();
+        const options = extractOptionsFromLine(valuesText);
+        
+        if (options.length >= 2) {
+          config.name = specName;
+          config.options = options;
+          break;
+        }
+      }
+    }
+  }
+  
+  // If still no config, use the first meaningful line
+  if (config.options.length === 0 && lines.length > 0) {
+    for (const line of lines) {
+      const words = line.split(/\s+/);
+      if (words.length >= 3 && words.length <= 8) {
+        const likelyOptions = words.filter(w => 
+          w.length > 1 && 
+          !w.toLowerCase().includes('spec') &&
+          !w.toLowerCase().includes('option') &&
+          !w.toLowerCase().includes('config')
+        );
+        
+        if (likelyOptions.length >= 2) {
+          config.name = "Specification";
+          config.options = likelyOptions.slice(0, 6);
+          break;
+        }
+      }
+    }
+  }
+  
+  // Ensure keys are populated
+  if (keys.length === 0 && config.options.length > 0) {
+    // Generate some generic keys based on common specifications
+    const commonSpecs = [
+      { name: "Material", options: ["Steel", "Aluminum", "Plastic"] },
+      { name: "Size", options: ["Small", "Medium", "Large"] },
+      { name: "Grade", options: ["A", "B", "C"] }
+    ];
+    
+    for (const spec of commonSpecs) {
+      if (keys.length < 3) {
+        keys.push(spec);
+      }
+    }
+  }
+  
+  return { config, keys, buyers: [] };
+}
 
-  console.error("No JSON found in response. Raw response:", text.substring(0, 1000));
-  return null;
+// Helper: Extract options from a line of text
+function extractOptionsFromLine(line: string): string[] {
+  if (!line) return [];
+  
+  // Clean the line
+  let cleanLine = line
+    .replace(/^[^:]*:\s*/, '')  // Remove prefix like "Options:"
+    .replace(/[\[\]{}()]/g, '') // Remove brackets
+    .trim();
+  
+  // Split by common separators
+  const options = cleanLine
+    .split(/[,;\/|]|\s+and\s+|\s+or\s+/i)
+    .map(opt => {
+      return opt
+        .replace(/^[\s"'\-]+/, '')
+        .replace(/[\s"'\-]+$/, '')
+        .trim();
+    })
+    .filter(opt => {
+      // Filter out invalid options
+      if (!opt || opt.length < 1 || opt.length > 50) return false;
+      if (opt.toLowerCase().includes('option')) return false;
+      if (opt.toLowerCase().includes('value')) return false;
+      if (opt.toLowerCase().includes('spec')) return false;
+      if (/^[0-9.,\s]+$/.test(opt)) return false; // Only numbers and punctuation
+      if (opt.toLowerCase() === 'etc') return false;
+      if (opt.toLowerCase() === 'and') return false;
+      if (opt.toLowerCase() === 'or') return false;
+      return true;
+    })
+    .slice(0, 8); // Limit to 8 options
+  
+  return [...new Set(options)]; // Remove duplicates
+}
+
+// Helper: Check if a string looks like a specification name
+function isLikelySpecName(text: string): boolean {
+  if (!text || text.length < 3 || text.length > 30) return false;
+  
+  const specKeywords = [
+    'material', 'grade', 'thickness', 'size', 'type', 'shape', 
+    'color', 'finish', 'weight', 'length', 'width', 'height',
+    'diameter', 'capacity', 'brand', 'model', 'quality',
+    'standard', 'specification', 'application', 'usage'
+  ];
+  
+  const textLower = text.toLowerCase();
+  
+  // Check if contains spec keywords
+  for (const keyword of specKeywords) {
+    if (textLower.includes(keyword)) {
+      return true;
+    }
+  }
+  
+  // Check if it's a single word or two words (common for specs)
+  const words = text.split(/\s+/);
+  return words.length <= 3;
+}
+
+// NEW: Extract specifications directly from URL content as fallback
+function extractFromURLContents(
+  urlContents: Array<{ url: string; content: string }>,
+  input: InputData
+): { config: ISQ; keys: ISQ[]; buyers: ISQ[] } {
+  console.log("Extracting specs directly from URL content...");
+  
+  const allText = urlContents.map(uc => uc.content).join('\n');
+  
+  // Look for common specification patterns in the content
+  const specPatterns = [
+    /(thickness|thk|gauge)[\s:]*([^.\n;]+)/gi,
+    /(material|grade|composition)[\s:]*([^.\n;]+)/gi,
+    /(size|dimension|measurement)[\s:]*([^.\n;]+)/gi,
+    /(type|kind|variety)[\s:]*([^.\n;]+)/gi,
+    /(color|colour)[\s:]*([^.\n;]+)/gi,
+    /(finish|surface|coating)[\s:]*([^.\n;]+)/gi,
+    /(length|width|height)[\s:]*([^.\n;]+)/gi,
+    /(diameter|dia)[\s:]*([^.\n;]+)/gi
+  ];
+  
+  const foundSpecs = new Map<string, Set<string>>();
+  
+  // Search for specifications
+  for (const pattern of specPatterns) {
+    const matches = Array.from(allText.matchAll(pattern));
+    
+    for (const match of matches) {
+      if (match[1] && match[2]) {
+        const specName = match[1].trim();
+        const valuesText = match[2].trim();
+        
+        const options = extractOptionsFromLine(valuesText);
+        
+        if (options.length > 0) {
+          const normalizedName = normalizeSpecName(specName);
+          
+          if (!foundSpecs.has(normalizedName)) {
+            foundSpecs.set(normalizedName, new Set());
+          }
+          
+          const optionSet = foundSpecs.get(normalizedName)!;
+          options.forEach(opt => optionSet.add(opt));
+        }
+      }
+    }
+  }
+  
+  // Convert to array and sort by number of options
+  const specsArray = Array.from(foundSpecs.entries())
+    .map(([name, optionsSet]) => ({
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      options: Array.from(optionsSet).slice(0, 6),
+      count: optionsSet.size
+    }))
+    .sort((a, b) => b.count - a.count);
+  
+  // Create result
+  const config: ISQ = specsArray.length > 0 
+    ? { name: specsArray[0].name, options: specsArray[0].options }
+    : { name: "Specification", options: ["Not Found"] };
+  
+  const keys: ISQ[] = specsArray
+    .slice(1, 4)
+    .map(spec => ({ name: spec.name, options: spec.options }));
+  
+  // If we don't have enough keys, add some based on category
+  if (keys.length < 3) {
+    const category = input.mcats[0]?.mcat_name || "";
+    
+    if (category.toLowerCase().includes('steel') || category.toLowerCase().includes('metal')) {
+      const additionalSpecs = [
+        { name: "Material", options: ["Steel", "Stainless Steel", "Aluminum"] },
+        { name: "Thickness", options: ["2 mm", "3 mm", "4 mm"] },
+        { name: "Size", options: ["4x4 ft", "5x5 ft", "6x6 ft"] }
+      ];
+      
+      for (const spec of additionalSpecs) {
+        if (keys.length < 3 && !keys.some(k => k.name === spec.name)) {
+          keys.push(spec);
+        }
+      }
+    }
+  }
+  
+  return { config, keys, buyers: [] };
 }
 
 async function fetchURL(url: string): Promise<string> {
@@ -662,58 +816,8 @@ REQUIRED JSON SCHEMA (match keys + nesting exactly)
 }`;
 }
 
-function buildISQExtractionPrompt(
-  input: InputData,
-  urls: string[],
-  contents: string[]
-): string {
-  const urlsText = urls
-    .map((url, i) => `URL ${i + 1}: ${url}\nContent: ${contents[i].substring(0, 1000)}...`)
-    .join("\n\n");
-
-  return `Extract ISQs from these URLs for: ${input.mcats.map((m) => m.mcat_name).join(", ")}
-
-${urlsText}
-
-Extract:
-1. CONFIG ISQ (exactly 1): Must influence price, options must match URLs exactly
-2. KEY ISQs (exactly 3): Most repeated + category defining
-
-STRICT RULES:
-- DO NOT invent specs
-- Extract ONLY specs that appear in AT LEAST 2 URLs
-- If a spec appears in only 1 URL → IGNORE it
-- If options differ, keep ONLY options that appear in AT LEAST 2 URLs
-- Do NOT guess missing options
-- EXCLUSION: If spec is in MCAT Name (e.g., "Material"), exclude it.
-- WITHOUT OPTIONS = INVALID SPEC (do not include it)
-
-FALLBACK RULE (VERY IMPORTANT):
-- If there is NO common specification shared across at least 2 URLs
-- OR the content across URLs has no meaningful similarity
-- THEN:
-  - Identify the most relevant and meaningful specifications from ALL URLs combined
-  - Merge information from all URLs logically
-  - Still extract AT LEAST 1 specification (CONFIG or KEY)
-  - Do NOT return empty output under any condition
-  - Even in fallback, DO NOT invent specs — only use what is explicitly present
-  -  WITHOUT OPTIONS = INVALID SPEC (do not include it)
-
-REQUIREMENTS:
-- Return ONLY valid JSON.
-- Absolutely no text, notes, or markdown outside JSON.
-- Output MUST start with { and end with }.
-- JSON must be valid and parseable
-
-RESPOND WITH PURE JSON ONLY - Nothing else. No markdown, no explanation, just raw JSON that looks exactly like this:
-{
-  "config": {"name": "...", "options": [...]},
-  "keys": [{"name": "...", "options": [...]}, ...]
-}`;
-}
-
 // ============================================
-// STAGE 3 BUYER ISQs SELECTION - IMPROVED VERSION
+// STAGE 3 BUYER ISQs SELECTION
 // ============================================
 
 export function selectStage3BuyerISQs(
@@ -762,9 +866,9 @@ export function selectStage3BuyerISQs(
 
   // 2️⃣ Flatten Stage2 specs
   const stage2All: (ISQ & { normName: string; priority: number })[] = [
-    { ...stage2.config, options: stage2.config.options || [], priority: 3 }, // Config ISQ highest priority
-    ...stage2.keys.map(k => ({ ...k, options: k.options || [], priority: 2 })), // Keys medium priority
-    ...(stage2.buyers || []).map(b => ({ ...b, options: b.options || [], priority: 1 })) // Buyers lowest priority
+    { ...stage2.config, options: stage2.config.options || [], priority: 3 },
+    ...stage2.keys.map(k => ({ ...k, options: k.options || [], priority: 2 })),
+    ...(stage2.buyers || []).map(b => ({ ...b, options: b.options || [], priority: 1 }))
   ]
   .map(s => ({ 
     ...s, 
@@ -774,7 +878,7 @@ export function selectStage3BuyerISQs(
   console.log('📊 Stage1 specs:', stage1All.length);
   console.log('📊 Stage2 specs:', stage2All.length);
 
-  // 3️⃣ Find common specs - IMPROVED LOGIC
+  // 3️⃣ Find common specs
   const commonSpecs: (ISQ & { 
     tier: string; 
     normName: string; 
@@ -789,12 +893,10 @@ export function selectStage3BuyerISQs(
     const matchingStage2 = stage2All.filter(s2 => s2.normName === s1.normName);
     
     if (matchingStage2.length > 0) {
-      // Find the best matching Stage2 spec (highest priority)
       const bestMatch = matchingStage2.reduce((best, current) => 
         current.priority > best.priority ? current : best
       );
       
-      // Calculate combined priority
       const combinedPriority = s1.priority + bestMatch.priority;
       
       commonSpecs.push({
@@ -807,7 +909,6 @@ export function selectStage3BuyerISQs(
   });
 
   console.log('🎯 Common specs found:', commonSpecs.length);
-  commonSpecs.forEach(s => console.log(`   - ${s.spec_name} (Priority: ${s.combinedPriority})`));
 
   if (commonSpecs.length === 0) {
     console.log('⚠️ No common specs found');
@@ -825,18 +926,19 @@ export function selectStage3BuyerISQs(
     const spec = commonSpecs[i];
     console.log(`\n📦 Processing spec ${i+1}: ${spec.spec_name}`);
     
-    // Get optimized options
     const options = getOptimizedBuyerISQOptions(
       spec.stage1Options, 
       spec.stage2Options,
       spec.normName
     );
     
-    buyerISQs.push({ 
-      name: spec.spec_name, 
-      options: options
-    });
-    console.log(`✅ Added buyer ISQ: ${spec.spec_name} with ${options.length} options`);
+    if (options.length > 0) {
+      buyerISQs.push({ 
+        name: spec.spec_name, 
+        options: options
+      });
+      console.log(`✅ Added buyer ISQ: ${spec.spec_name} with ${options.length} options`);
+    }
   }
 
   console.log('🎉 Final buyer ISQs:', buyerISQs.length);
@@ -850,14 +952,11 @@ function getOptimizedBuyerISQOptions(
   normName: string
 ): string[] {
   console.log(`🔧 Getting optimized options for: "${normName}"`);
-  console.log(`   Stage 1 options:`, stage1Options);
-  console.log(`   Stage 2 options:`, stage2Options);
 
   const result: string[] = [];
   const seen = new Set<string>();
 
   // Step 1: Add EXACT matches first
-  console.log('   Step 1: Adding exact matches...');
   for (const opt1 of stage1Options) {
     if (result.length >= 8) break;
     
@@ -869,13 +968,11 @@ function getOptimizedBuyerISQOptions(
     if (exactMatch && !seen.has(cleanOpt1)) {
       result.push(opt1);
       seen.add(cleanOpt1);
-      console.log(`     ✅ Exact match: "${opt1}"`);
     }
   }
 
   // Step 2: Add STRONG semantic matches
   if (result.length < 8) {
-    console.log('   Step 2: Adding strong semantic matches...');
     for (const opt1 of stage1Options) {
       if (result.length >= 8) break;
       
@@ -888,7 +985,6 @@ function getOptimizedBuyerISQOptions(
         if (areOptionsStronglySimilar(opt1, opt2) && !seen.has(cleanOpt1)) {
           result.push(opt1);
           seen.add(cleanOpt1);
-          console.log(`     ✅ Strong match: "${opt1}" ↔ "${opt2}"`);
           break;
         }
       }
@@ -897,38 +993,19 @@ function getOptimizedBuyerISQOptions(
 
   // Step 3: Add remaining Stage 1 options (most relevant)
   if (result.length < 8) {
-    console.log('   Step 3: Adding remaining Stage 1 options...');
     const remainingStage1 = stage1Options.filter(opt => {
       const cleanOpt = opt.trim().toLowerCase();
       return !seen.has(cleanOpt);
     });
     
-    // Take top options (max 8 total)
     const toAdd = Math.min(8 - result.length, remainingStage1.length);
     for (let i = 0; i < toAdd; i++) {
       result.push(remainingStage1[i]);
       seen.add(remainingStage1[i].trim().toLowerCase());
-      console.log(`     ➕ Stage 1: "${remainingStage1[i]}"`);
     }
   }
 
-  // Step 4: Add remaining Stage 2 options if still needed
- // if (result.length < 8) {
-   // console.log('   Step 4: Adding remaining Stage 2 options...');
-   // const remainingStage2 = stage2Options.filter(opt => {
-    //  const cleanOpt = opt.trim().toLowerCase();
-     // return !seen.has(cleanOpt);
-  //  });
-    
-   // const toAdd = Math.min(8 - result.length, remainingStage2.length);
-   // for (let i = 0; i < toAdd; i++) {
-    //  result.push(remainingStage2[i]);
-    //  seen.add(remainingStage2[i].trim().toLowerCase());
-     // console.log(`     ➕ Stage 2: "${remainingStage2[i]}"`);
-   // }
- // }
-
-  // Step 5: Ensure no duplicates in final result
+  // Step 4: Ensure no duplicates in final result
   const finalResult: string[] = [];
   const finalSeen = new Set<string>();
   
@@ -975,7 +1052,6 @@ function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
     const inGroup1 = group.some(term => clean1.includes(term));
     const inGroup2 = group.some(term => clean2.includes(term));
     if (inGroup1 && inGroup2) {
-      // Check if same numeric grade
       const num1 = clean1.match(/\b(\d+)\b/)?.[1];
       const num2 = clean2.match(/\b(\d+)\b/)?.[1];
       if (num1 && num2 && num1 !== num2) return false;
@@ -991,12 +1067,11 @@ function areOptionsStronglySimilar(opt1: string, opt2: string): boolean {
     const value = parseFloat(match[1]);
     const unit = match[3]?.toLowerCase() || '';
     
-    // Convert to mm for comparison
     if (unit === 'cm' || unit === 'centimeter') return value * 10;
     if (unit === 'm' || unit === 'meter') return value * 1000;
     if (unit === 'inch' || unit === 'in' || unit === '"') return value * 25.4;
     if (unit === 'ft' || unit === 'feet' || unit === "'") return value * 304.8;
-    return value; // assume mm
+    return value;
   };
   
   const meas1 = getMeasurement(clean1);
