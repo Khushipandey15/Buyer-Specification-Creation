@@ -686,6 +686,7 @@ STRICT RULES:
 - If options differ, keep ONLY options that appear in AT LEAST 2 URLs
 - Do NOT guess missing options
 - EXCLUSION: If spec is in MCAT Name (e.g., "Material"), exclude it.
+- WITHOUT OPTIONS = INVALID SPEC (do not include it)
 
 FALLBACK RULE (VERY IMPORTANT):
 - If there is NO common specification shared across at least 2 URLs
@@ -696,6 +697,7 @@ FALLBACK RULE (VERY IMPORTANT):
   - Still extract AT LEAST 1 specification (CONFIG or KEY)
   - Do NOT return empty output under any condition
   - Even in fallback, DO NOT invent specs — only use what is explicitly present
+  -  WITHOUT OPTIONS = INVALID SPEC (do not include it)
 
 REQUIREMENTS:
 - Return ONLY valid JSON.
